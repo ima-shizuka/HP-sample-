@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Sessions: public read, no client write (admin only via Functions)
+    match /sessions/{sessionId} {
+      allow read: if true;
+      allow write: if false; // managed via admin SDK in Functions
+    }
+
+    // Registrations: anyone can create, no client update/delete
+    match /registrations/{regId} {
+      allow read: if false; // read via Functions only (admin)
+      allow create: if true; // parents can register
+      allow update, delete: if false; // only Cloud Functions can modify
+    }
+
+    // Notification logs: internal use only
+    match /notificationLogs/{logId} {
+      allow read, write: if false;
+    }
+  }
+}
