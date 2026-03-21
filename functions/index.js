@@ -2,75 +2,112 @@
  * Firebase Cloud Functions for Table Tennis Club Attendance App
  *
  * Functions:
- * 1. onRegistrationUpdate - Triggers when a registration status changes to 'pending_upgrade'
- *    → Sends LINE/email notification to the upgraded user
- * 2. onCancelRegistration (HTTP) - Called from client to cancel a registration
- * 3. sendDailyReminder - Scheduled function to send day-before reminders
+ * 1. onRegistrationUpgrade - Triggers when status changes to 'pending_upgrade'
+ *    → Sends LINE/email notification to the user
+ * 2. expireUpgradeOffers   - Scheduled every hour: auto-decline offers older than 24h
+ *    → Moves expired pending_upgrade → cancelled, promotes next waitlisted
+ * 3. sendDailyReminder     - Scheduled 8am JST: day-before reminder to confirmed participants
  */
 
 const { onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { onRequest } = require('firebase-functions/v2/https');
 const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { initializeApp } = require('firebase-admin/app');
-const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const { getFirestore, FieldValue, Timestamp } = require('firebase-admin/firestore');
 const { defineString, defineSecret } = require('firebase-functions/params');
 const nodemailer = require('nodemailer');
-const line = require('@line/bot-sdk');
+
+// LINE SDK is optional — only used when LINE credentials are set
+let lineModule = null;
+try { lineModule = require('@line/bot-sdk'); } catch (_) {}
 
 initializeApp();
 const db = getFirestore();
 
-// ── Config params (set in Firebase console or .env)
-const APP_URL = defineString('APP_URL', { default: 'https://your-app.web.app' });
+// ── Config params ──────────────────────────────────────────────────────────────
+const APP_URL         = defineString('APP_URL', { default: 'https://your-app.web.app' });
+const CLUB_NAME       = defineString('CLUB_NAME', { default: '卓球クラブ' });
+const SMTP_HOST       = defineString('SMTP_HOST', { default: 'smtp.gmail.com' });
+const SMTP_PORT       = defineString('SMTP_PORT', { default: '587' });
+const EMAIL_FROM      = defineString('EMAIL_FROM', { default: '卓球クラブ <noreply@example.com>' });
+const UPGRADE_HOURS   = defineString('UPGRADE_HOURS', { default: '24' }); // auto-expire after N hours
+
 const LINE_CHANNEL_ACCESS_TOKEN = defineSecret('LINE_CHANNEL_ACCESS_TOKEN');
-const LINE_CHANNEL_SECRET = defineSecret('LINE_CHANNEL_SECRET');
-const SMTP_HOST = defineString('SMTP_HOST', { default: 'smtp.gmail.com' });
-const SMTP_PORT = defineString('SMTP_PORT', { default: '587' });
-const SMTP_USER = defineSecret('SMTP_USER');
-const SMTP_PASS = defineSecret('SMTP_PASS');
-const EMAIL_FROM = defineString('EMAIL_FROM', { default: '卓球クラブ <noreply@example.com>' });
-const CLUB_NAME = defineString('CLUB_NAME', { default: '卓球クラブ' });
+const LINE_CHANNEL_SECRET       = defineSecret('LINE_CHANNEL_SECRET');
+const SMTP_USER                 = defineSecret('SMTP_USER');
+const SMTP_PASS                 = defineSecret('SMTP_PASS');
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function formatDate(dateStr) {
-  const [y, m, d] = dateStr.split('-');
   const days = ['日', '月', '火', '水', '木', '金', '土'];
   const date = new Date(`${dateStr}T00:00:00+09:00`);
+  const [, m, d] = dateStr.split('-');
   return `${parseInt(m)}月${parseInt(d)}日(${days[date.getDay()]})`;
 }
 
-async function getSession(sessionId) {
+async function getSessionDoc(sessionId) {
   const snap = await db.collection('sessions').doc(sessionId).get();
   return snap.exists ? { id: snap.id, ...snap.data() } : null;
 }
 
-async function sendLineNotification(lineUserId, message, token, lineClient) {
-  if (!lineUserId || !lineClient) return false;
+async function promoteNextWaitlisted(sessionId, tx) {
+  const wq = db.collection('registrations')
+    .where('sessionId', '==', sessionId)
+    .where('status', '==', 'waitlisted')
+    .orderBy('waitlistPosition', 'asc')
+    .limit(1);
+  const wSnap = await wq.get();
+  if (wSnap.empty) return null;
+  const next = wSnap.docs[0];
+  const data = { id: next.id, ...next.data() };
+  if (tx) {
+    tx.update(next.ref, { status: 'pending_upgrade', updatedAt: FieldValue.serverTimestamp() });
+    tx.update(db.collection('sessions').doc(sessionId), { waitlistCount: FieldValue.increment(-1) });
+  } else {
+    await next.ref.update({ status: 'pending_upgrade', updatedAt: FieldValue.serverTimestamp() });
+    await db.collection('sessions').doc(sessionId).update({ waitlistCount: FieldValue.increment(-1) });
+  }
+  return data;
+}
+
+async function sendLineMsg(lineUserId, message, accessToken) {
+  if (!lineUserId || !accessToken || !lineModule) return false;
   try {
-    const appUrl = APP_URL.value();
-    const upgradeUrl = `${appUrl}/?upgrade=${token}`;
-    await lineClient.pushMessage(lineUserId, {
+    const client = new lineModule.messagingApi.MessagingApiClient({ channelAccessToken: accessToken });
+    await client.pushMessage(lineUserId, { type: 'text', text: message });
+    return true;
+  } catch (err) {
+    console.error('LINE push error:', err.message);
+    return false;
+  }
+}
+
+async function sendLineMsgWithConfirm(lineUserId, message, acceptUrl, declineUrl, accessToken) {
+  if (!lineUserId || !accessToken || !lineModule) return false;
+  try {
+    const client = new lineModule.messagingApi.MessagingApiClient({ channelAccessToken: accessToken });
+    await client.pushMessage(lineUserId, {
       type: 'template',
       altText: message,
       template: {
         type: 'confirm',
         text: message,
         actions: [
-          { type: 'uri', label: '参加する', uri: upgradeUrl + '&accept=1' },
-          { type: 'uri', label: '参加しない', uri: upgradeUrl + '&accept=0' },
+          { type: 'uri', label: '✅ 参加する', uri: acceptUrl },
+          { type: 'uri', label: '参加しない', uri: declineUrl },
         ],
       },
     });
     return true;
   } catch (err) {
-    console.error('LINE notification error:', err);
+    console.error('LINE confirm error:', err.message);
     return false;
   }
 }
 
-async function sendEmailNotification(email, subject, html, smtpUser, smtpPass) {
-  if (!email) return false;
+async function sendEmail(to, subject, html, smtpUser, smtpPass) {
+  if (!to || !smtpUser || !smtpPass) return false;
   try {
     const transporter = nodemailer.createTransport({
       host: SMTP_HOST.value(),
@@ -78,20 +115,15 @@ async function sendEmailNotification(email, subject, html, smtpUser, smtpPass) {
       secure: false,
       auth: { user: smtpUser, pass: smtpPass },
     });
-    await transporter.sendMail({
-      from: EMAIL_FROM.value(),
-      to: email,
-      subject,
-      html,
-    });
+    await transporter.sendMail({ from: EMAIL_FROM.value(), to, subject, html });
     return true;
   } catch (err) {
-    console.error('Email notification error:', err);
+    console.error('Email error:', err.message);
     return false;
   }
 }
 
-// ── Function 1: Watch for pending_upgrade status ───────────────────────────────
+// ── Function 1: Trigger on pending_upgrade ────────────────────────────────────
 
 exports.onRegistrationUpgrade = onDocumentUpdated(
   {
@@ -101,105 +133,143 @@ exports.onRegistrationUpgrade = onDocumentUpdated(
   },
   async (event) => {
     const before = event.data.before.data();
-    const after = event.data.after.data();
-
-    // Only trigger when status changes to 'pending_upgrade'
+    const after  = event.data.after.data();
     if (before.status === after.status || after.status !== 'pending_upgrade') return;
 
-    const reg = { id: event.params.registrationId, ...after };
-    const session = await getSession(reg.sessionId);
+    const reg     = { id: event.params.registrationId, ...after };
+    const session = await getSessionDoc(reg.sessionId);
     if (!session) return;
 
-    const dateStr = formatDate(session.date);
-    const clubName = CLUB_NAME.value();
-    const appUrl = APP_URL.value();
-    const upgradeUrl = `${appUrl}/?upgrade=${reg.notificationToken}`;
-    const message = `【${clubName}】${dateStr}の練習に空きが出ました！参加しますか？`;
+    const dateStr    = formatDate(session.date);
+    const club       = CLUB_NAME.value();
+    const appUrl     = APP_URL.value();
+    const acceptUrl  = `${appUrl}/?upgrade=${reg.notificationToken}&accept=1`;
+    const declineUrl = `${appUrl}/?upgrade=${reg.notificationToken}&accept=0`;
+    const message    = `【${club}】${dateStr}の練習に空きが出ました！参加しますか？`;
 
+    const lineToken = LINE_CHANNEL_ACCESS_TOKEN.value();
     let notified = false;
 
     // Try LINE first
-    if (reg.lineUserId && LINE_CHANNEL_ACCESS_TOKEN.value()) {
-      const lineClient = new line.messagingApi.MessagingApiClient({
-        channelAccessToken: LINE_CHANNEL_ACCESS_TOKEN.value(),
-      });
-      notified = await sendLineNotification(reg.lineUserId, message, reg.notificationToken, lineClient);
+    if (reg.lineUserId && lineToken) {
+      notified = await sendLineMsgWithConfirm(reg.lineUserId, message, acceptUrl, declineUrl, lineToken);
     }
 
-    // Fallback to email
+    // Fallback: email
     if (!notified && reg.email) {
       const html = `
-        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
-          <h2 style="color:#1d4ed8">🏓 ${clubName}</h2>
-          <h3>練習参加のご案内</h3>
-          <p>${reg.childName} さんの保護者様</p>
-          <p>
-            <strong>${dateStr}</strong>の練習にキャンセルが発生し、空きが出ました。<br>
-            参加しますか？
-          </p>
-          <div style="margin:24px 0;display:flex;gap:12px">
-            <a href="${upgradeUrl}?accept=1"
-               style="display:inline-block;background:#2563eb;color:white;padding:14px 28px;
-                      border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px">
-              ✅ 参加する
-            </a>
-            <a href="${upgradeUrl}?accept=0"
-               style="display:inline-block;background:#6b7280;color:white;padding:14px 28px;
-                      border-radius:8px;text-decoration:none;font-weight:bold;font-size:16px">
-              参加しない
-            </a>
+        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#f9fafb">
+          <div style="background:white;border-radius:16px;padding:24px;border:1px solid #e5e7eb">
+            <h2 style="color:#1d4ed8;margin:0 0 4px">🏓 ${club}</h2>
+            <h3 style="margin:0 0 16px;color:#111827">練習参加のご案内</h3>
+            <p style="color:#374151">${reg.childName} さんの保護者様</p>
+            <p style="color:#374151">
+              <strong>${dateStr}</strong>の練習にキャンセルが発生し、空きが出ました。<br>参加しますか？
+            </p>
+            <div style="margin:24px 0;display:flex;gap:12px;flex-wrap:wrap">
+              <a href="${acceptUrl}"
+                 style="display:inline-block;background:#2563eb;color:white;padding:14px 28px;
+                        border-radius:10px;text-decoration:none;font-weight:bold;font-size:16px">
+                ✅ 参加する
+              </a>
+              <a href="${declineUrl}"
+                 style="display:inline-block;background:#6b7280;color:white;padding:14px 28px;
+                        border-radius:10px;text-decoration:none;font-weight:bold;font-size:16px">
+                参加しない
+              </a>
+            </div>
+            <p style="color:#9ca3af;font-size:12px;margin:0">
+              ※ このリンクは${UPGRADE_HOURS.value()}時間以内にご回答ください。<br>
+              ※ 期限を過ぎると次のキャンセル待ちの方に自動的にご連絡します。
+            </p>
           </div>
-          <p style="color:#6b7280;font-size:12px">
-            ※ このリンクは一度のみ有効です。<br>
-            ※ 「参加しない」の場合は次のキャンセル待ちの方にご連絡します。
-          </p>
-        </div>
-      `;
-      notified = await sendEmailNotification(
+        </div>`;
+      notified = await sendEmail(
         reg.email,
-        `【${clubName}】${dateStr}の練習に空きが出ました`,
+        `【${club}】${dateStr}の練習に空きが出ました`,
         html,
         SMTP_USER.value(),
         SMTP_PASS.value()
       );
     }
 
-    // Record notification attempt
+    // Store expiry timestamp for the scheduled expiration check
+    const expiresAt = Timestamp.fromDate(
+      new Date(Date.now() + parseInt(UPGRADE_HOURS.value()) * 60 * 60 * 1000)
+    );
+    await db.collection('registrations').doc(reg.id).update({
+      upgradeOfferedAt: FieldValue.serverTimestamp(),
+      upgradeExpiresAt: expiresAt,
+    });
+
     await db.collection('notificationLogs').add({
       registrationId: reg.id,
       sessionId: reg.sessionId,
       type: 'upgrade_offer',
-      channel: reg.lineUserId ? 'line' : 'email',
+      channel: reg.lineUserId ? 'line' : (reg.email ? 'email' : 'none'),
       notified,
       createdAt: FieldValue.serverTimestamp(),
     });
 
-    console.log(`Upgrade notification sent: reg=${reg.id}, notified=${notified}`);
+    console.log(`Upgrade notification: reg=${reg.id}, notified=${notified}`);
   }
 );
 
-// ── Function 2: HTTP endpoint for upgrade response ────────────────────────────
-// This handles the accept/decline via URL param (for LINE quick replies)
+// ── Function 2: Auto-expire upgrade offers ────────────────────────────────────
 
-exports.upgradeResponse = onRequest(
+exports.expireUpgradeOffers = onSchedule(
   {
+    schedule: 'every 60 minutes',
+    timeZone: 'Asia/Tokyo',
+    secrets: [LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, SMTP_USER, SMTP_PASS],
     region: 'asia-northeast1',
-    cors: true,
   },
-  async (req, res) => {
-    const { token, accept } = req.query;
-    if (!token) {
-      res.redirect('/?error=invalid');
+  async () => {
+    const now = Timestamp.now();
+    const snap = await db.collection('registrations')
+      .where('status', '==', 'pending_upgrade')
+      .where('upgradeExpiresAt', '<=', now)
+      .get();
+
+    if (snap.empty) {
+      console.log('No expired upgrade offers');
       return;
     }
 
-    const appUrl = APP_URL.value();
-    // Redirect to the SPA upgrade page for full UI handling
-    res.redirect(`${appUrl}/?upgrade=${token}&accept=${accept}`);
+    console.log(`Expiring ${snap.docs.length} upgrade offer(s)`);
+
+    for (const regDoc of snap.docs) {
+      const reg = { id: regDoc.id, ...regDoc.data() };
+
+      await db.runTransaction(async (tx) => {
+        const rRef = db.collection('registrations').doc(reg.id);
+        tx.update(rRef, { status: 'cancelled', updatedAt: FieldValue.serverTimestamp() });
+        // Promote next waitlisted (non-transactional helper, pass tx)
+      });
+
+      // Promote next outside of transaction (simpler, acceptable for this use case)
+      await db.collection('registrations').doc(reg.id).update({
+        status: 'cancelled',
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      const next = await promoteNextWaitlisted(reg.sessionId, null);
+      if (next) {
+        console.log(`Auto-promoted reg ${next.id} after expiry of ${reg.id}`);
+      }
+
+      await db.collection('notificationLogs').add({
+        registrationId: reg.id,
+        sessionId: reg.sessionId,
+        type: 'upgrade_expired',
+        notified: false,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+    }
   }
 );
 
-// ── Function 3: Daily reminder (8am JST) ─────────────────────────────────────
+// ── Function 3: Daily reminder (8am JST) ──────────────────────────────────────
 
 exports.sendDailyReminder = onSchedule(
   {
@@ -208,8 +278,7 @@ exports.sendDailyReminder = onSchedule(
     secrets: [LINE_CHANNEL_ACCESS_TOKEN, LINE_CHANNEL_SECRET, SMTP_USER, SMTP_PASS],
     region: 'asia-northeast1',
   },
-  async (event) => {
-    // Find sessions scheduled for tomorrow
+  async () => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = tomorrow.toISOString().split('T')[0];
@@ -219,55 +288,47 @@ exports.sendDailyReminder = onSchedule(
       .get();
 
     if (sessionsSnap.empty) {
-      console.log('No sessions tomorrow');
+      console.log('No sessions tomorrow:', tomorrowStr);
       return;
     }
 
-    const clubName = CLUB_NAME.value();
+    const club     = CLUB_NAME.value();
+    const lineToken = LINE_CHANNEL_ACCESS_TOKEN.value();
 
     for (const sessionDoc of sessionsSnap.docs) {
       const session = { id: sessionDoc.id, ...sessionDoc.data() };
       const dateStr = formatDate(session.date);
 
-      // Get confirmed registrations
       const regsSnap = await db.collection('registrations')
         .where('sessionId', '==', session.id)
         .where('status', '==', 'confirmed')
         .get();
 
       for (const regDoc of regsSnap.docs) {
-        const reg = regDoc.data();
-        const message = `【${clubName}】明日 ${dateStr} の練習のご案内\n${reg.childName}さんの参加が確定しています。お気をつけてお越しください！`;
+        const reg     = regDoc.data();
+        const msgText = `【${club}】明日 ${dateStr} の練習のご案内\n${reg.childName}さんの参加が確定しています。お気をつけてお越しください！`;
 
-        // Send LINE
-        if (reg.lineUserId && LINE_CHANNEL_ACCESS_TOKEN.value()) {
-          const lineClient = new line.messagingApi.MessagingApiClient({
-            channelAccessToken: LINE_CHANNEL_ACCESS_TOKEN.value(),
-          });
-          try {
-            await lineClient.pushMessage(reg.lineUserId, {
-              type: 'text',
-              text: message,
-            });
-          } catch (err) {
-            console.error('LINE reminder error:', err);
-          }
+        if (reg.lineUserId && lineToken) {
+          await sendLineMsg(reg.lineUserId, msgText, lineToken);
         }
 
-        // Send email
         if (reg.email) {
           const html = `
-            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px">
-              <h2 style="color:#1d4ed8">🏓 ${clubName}</h2>
-              <h3>明日の練習のご案内</h3>
-              <p>${reg.childName} さんの保護者様</p>
-              <p>明日 <strong>${dateStr}</strong> の練習への参加が確定しています。</p>
-              <p>お気をつけてお越しください！</p>
-            </div>
-          `;
-          await sendEmailNotification(
+            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px;background:#f9fafb">
+              <div style="background:white;border-radius:16px;padding:24px;border:1px solid #e5e7eb">
+                <h2 style="color:#1d4ed8;margin:0 0 4px">🏓 ${club}</h2>
+                <h3 style="margin:0 0 16px;color:#111827">明日の練習のご案内</h3>
+                <p style="color:#374151">${reg.childName} さんの保護者様</p>
+                <p style="color:#374151">
+                  明日 <strong>${dateStr}</strong> の練習への参加が確定しています。<br>
+                  お気をつけてお越しください！
+                </p>
+                <p style="color:#6b7280;font-size:14px">参加人数：${session.confirmedCount} / ${session.capacity} 人</p>
+              </div>
+            </div>`;
+          await sendEmail(
             reg.email,
-            `【${clubName}】明日 ${dateStr} の練習のご案内`,
+            `【${club}】明日 ${dateStr} の練習のご案内`,
             html,
             SMTP_USER.value(),
             SMTP_PASS.value()
@@ -275,7 +336,6 @@ exports.sendDailyReminder = onSchedule(
         }
       }
     }
-
     console.log(`Daily reminders sent for ${tomorrowStr}`);
   }
 );

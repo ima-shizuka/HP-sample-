@@ -2,20 +2,22 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Sessions: public read, no client write (admin only via Functions)
+    // Sessions: public read (parents check capacity), write open (PIN-gated at UI layer)
     match /sessions/{sessionId} {
       allow read: if true;
-      allow write: if false; // managed via admin SDK in Functions
+      allow write: if true;
     }
 
-    // Registrations: anyone can create, no client update/delete
+    // Registrations: public create (parents register), read/update open (admin PIN-gated at UI)
+    // Delete is forbidden — use status='cancelled' instead
     match /registrations/{regId} {
-      allow read: if false; // read via Functions only (admin)
-      allow create: if true; // parents can register
-      allow update, delete: if false; // only Cloud Functions can modify
+      allow read:   if true;
+      allow create: if true;
+      allow update: if true;
+      allow delete: if false;
     }
 
-    // Notification logs: internal use only
+    // Notification logs: server-side only (Cloud Functions Admin SDK)
     match /notificationLogs/{logId} {
       allow read, write: if false;
     }

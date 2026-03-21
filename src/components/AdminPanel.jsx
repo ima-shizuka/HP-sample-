@@ -1,40 +1,35 @@
-import { useState, useEffect, useCallback } from 'react';
-import { format, parseISO } from 'date-fns';
+import { useState, useEffect } from 'react';
+import { format, parseISO, addDays, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import {
   Users, Clock, X, Download, Plus, Trash2, ChevronDown, ChevronUp,
-  RefreshCw, LogOut, Settings
+  LogOut, Calendar, Bell, RefreshCw
 } from 'lucide-react';
 import {
-  getSessions,
   createSession,
   deleteSession,
-  updateSession,
-  getAllRegistrationsForSession,
   cancelRegistration,
   subscribeToSessions,
   subscribeToRegistrations,
 } from '../lib/db';
-
-const TABS = { SESSIONS: 'sessions', REGISTRATIONS: 'registrations', SETTINGS: 'settings' };
 
 function fmtDate(d) {
   return format(parseISO(d), 'M月d日(E)', { locale: ja });
 }
 
 function toCSV(regs, sessionDate) {
-  const header = '名前,保護者,ステータス,キャンセル待ち順,登録日時,メール';
+  const header = '名前,保護者,メール,ステータス,キャンセル待ち順,登録日時';
   const rows = regs.map((r) => [
     r.childName,
     r.parentName,
-    r.status === 'confirmed' ? '参加確定'
-      : r.status === 'waitlisted' ? `キャンセル待ち(${r.waitlistPosition}番)`
+    r.email || '',
+    r.status === 'confirmed'       ? '参加確定'
+      : r.status === 'waitlisted'  ? `キャンセル待ち(${r.waitlistPosition}番)`
       : r.status === 'pending_upgrade' ? '繰り上げ確認中'
       : 'キャンセル',
     r.waitlistPosition || '',
     r.createdAt?.toDate ? format(r.createdAt.toDate(), 'yyyy/MM/dd HH:mm') : '',
-    r.email || '',
-  ].join(','));
+  ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
   return [header, ...rows].join('\n');
 }
 
@@ -43,7 +38,7 @@ function RegistrationRow({ reg, onCancel }) {
   const [cancelling, setCancelling] = useState(false);
 
   async function handleCancel() {
-    if (!confirm(`${reg.childName} の登録をキャンセルしますか？`)) return;
+    if (!confirm(`${reg.childName} の登録をキャンセルしますか？\nキャンセル待ちがいる場合は自動で繰り上げ通知されます。`)) return;
     setCancelling(true);
     try {
       await onCancel(reg.id);
@@ -53,17 +48,19 @@ function RegistrationRow({ reg, onCancel }) {
   }
 
   const statusBadge = () => {
-    if (reg.status === 'confirmed') return <span className="badge-confirmed">参加確定</span>;
-    if (reg.status === 'waitlisted') return (
-      <span className="badge-waitlist">待ち {reg.waitlistPosition} 番</span>
-    );
-    if (reg.status === 'pending_upgrade') return (
-      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-        繰り上げ確認中
-      </span>
-    );
-    return <span className="badge-cancelled">キャンセル</span>;
+    switch (reg.status) {
+      case 'confirmed':       return <span className="badge-confirmed">参加確定</span>;
+      case 'waitlisted':      return <span className="badge-waitlist">待ち {reg.waitlistPosition} 番</span>;
+      case 'pending_upgrade': return (
+        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+          <Bell className="w-3 h-3 mr-1" />繰り上げ確認中
+        </span>
+      );
+      default: return <span className="badge-cancelled">キャンセル</span>;
+    }
   };
+
+  const canCancel = reg.status === 'confirmed' || reg.status === 'waitlisted';
 
   return (
     <div className="flex items-center gap-2 py-2.5 border-b border-gray-50 last:border-0">
@@ -73,7 +70,7 @@ function RegistrationRow({ reg, onCancel }) {
         {reg.email && <div className="text-xs text-gray-400 truncate">{reg.email}</div>}
       </div>
       <div className="shrink-0">{statusBadge()}</div>
-      {(reg.status === 'confirmed' || reg.status === 'waitlisted') && (
+      {canCancel && (
         <button
           onClick={handleCancel}
           disabled={cancelling}
@@ -88,10 +85,11 @@ function RegistrationRow({ reg, onCancel }) {
 }
 
 // ─── Session card ─────────────────────────────────────────────────────────────
-function SessionCard({ session, onCancelReg }) {
+function SessionCard({ session, onDelete, onCancelReg }) {
   const [expanded, setExpanded] = useState(false);
   const [regs, setRegs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     if (!expanded) return;
@@ -112,6 +110,12 @@ function SessionCard({ session, onCancelReg }) {
     a.download = `参加者_${session.date}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function handleDelete() {
+    if (!confirm(`${fmtDate(session.date)} を削除しますか？\n登録データは残ります。`)) return;
+    setDeleting(true);
+    try { await onDelete(session.id); } finally { setDeleting(false); }
   }
 
   const confirmed = regs.filter((r) => r.status === 'confirmed' || r.status === 'pending_upgrade');
@@ -144,7 +148,17 @@ function SessionCard({ session, onCancelReg }) {
             )}
           </div>
         </div>
-        {expanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); handleDelete(); }}
+            disabled={deleting}
+            className="p-1.5 text-red-300 hover:text-red-500 disabled:opacity-50"
+            title="削除"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+          {expanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
+        </div>
       </button>
 
       {expanded && (
@@ -167,8 +181,8 @@ function SessionCard({ session, onCancelReg }) {
               <div className="text-xs font-semibold text-yellow-600 uppercase tracking-wide mb-2">
                 キャンセル待ち ({waitlisted.length}人)
               </div>
-              {waitlisted
-                .sort((a, b) => a.waitlistPosition - b.waitlistPosition)
+              {[...waitlisted]
+                .sort((a, b) => (a.waitlistPosition || 0) - (b.waitlistPosition || 0))
                 .map((r) => (
                   <RegistrationRow key={r.id} reg={r} onCancel={onCancelReg} />
                 ))}
@@ -179,17 +193,19 @@ function SessionCard({ session, onCancelReg }) {
             <div className="text-center text-gray-400 text-sm py-4">登録なし</div>
           )}
 
-          <button onClick={downloadCSV} className="flex items-center gap-2 text-blue-600 text-sm font-medium">
-            <Download className="w-4 h-4" />
-            CSVダウンロード
-          </button>
+          {!loading && regs.length > 0 && (
+            <button onClick={downloadCSV} className="flex items-center gap-2 text-blue-600 text-sm font-medium">
+              <Download className="w-4 h-4" />
+              CSVダウンロード
+            </button>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ─── Add session form ─────────────────────────────────────────────────────────
+// ─── Add single session form ───────────────────────────────────────────────────
 function AddSessionForm({ onAdd }) {
   const [date, setDate] = useState('');
   const [capacity, setCapacity] = useState(20);
@@ -202,50 +218,178 @@ function AddSessionForm({ onAdd }) {
     try {
       await onAdd({ date, capacity: Number(capacity) });
       setDate('');
-      setCapacity(20);
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="card space-y-4">
-      <h3 className="font-semibold text-gray-800">練習日を追加</h3>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-gray-600">日付</label>
-          <input
-            type="date"
-            className="input-field text-sm py-2"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            required
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-gray-600">定員 (人)</label>
-          <input
-            type="number"
-            className="input-field text-sm py-2"
-            min="1"
-            max="100"
-            value={capacity}
-            onChange={(e) => setCapacity(e.target.value)}
-            required
-          />
-        </div>
+    <form onSubmit={handleSubmit} className="flex gap-2 items-end">
+      <div className="flex-1 space-y-1">
+        <label className="text-xs font-medium text-gray-600">日付</label>
+        <input
+          type="date"
+          className="input-field text-sm py-2"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          required
+        />
       </div>
-      <button type="submit" disabled={loading || !date} className="btn-primary py-2.5 text-sm">
-        {loading ? '追加中...' : '+ 追加'}
+      <div className="w-20 space-y-1">
+        <label className="text-xs font-medium text-gray-600">定員</label>
+        <input
+          type="number"
+          className="input-field text-sm py-2"
+          min="1"
+          max="100"
+          value={capacity}
+          onChange={(e) => setCapacity(e.target.value)}
+        />
+      </div>
+      <button type="submit" disabled={loading || !date} className="btn-primary py-2.5 text-sm w-auto px-5">
+        {loading ? '...' : '追加'}
       </button>
     </form>
   );
 }
 
+// ─── Monthly batch session creator ────────────────────────────────────────────
+function MonthlyBatchForm({ existingDates, onAdd }) {
+  const today = new Date();
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth() + 1);
+  const [selectedWeekdays, setSelectedWeekdays] = useState([6]); // Saturday default
+  const [capacity, setCapacity] = useState(20);
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState([]);
+
+  const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+  function calcPreview(y, m, weekdays) {
+    const start = startOfMonth(new Date(y, m - 1, 1));
+    const end = endOfMonth(start);
+    return eachDayOfInterval({ start, end })
+      .filter((d) => weekdays.includes(getDay(d)))
+      .map((d) => format(d, 'yyyy-MM-dd'));
+  }
+
+  useEffect(() => {
+    setPreview(calcPreview(year, month, selectedWeekdays));
+  }, [year, month, selectedWeekdays]);
+
+  function toggleWeekday(wd) {
+    setSelectedWeekdays((prev) =>
+      prev.includes(wd) ? prev.filter((d) => d !== wd) : [...prev, wd]
+    );
+  }
+
+  async function handleBatchAdd() {
+    const toAdd = preview.filter((d) => !existingDates.includes(d));
+    if (toAdd.length === 0) {
+      alert('追加する日程がありません（すでに登録済みか、対象の曜日がありません）');
+      return;
+    }
+    if (!confirm(`${toAdd.length}件の練習日を追加しますか？`)) return;
+    setLoading(true);
+    try {
+      for (const date of toAdd) {
+        await onAdd({ date, capacity: Number(capacity) });
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const newDates = preview.filter((d) => !existingDates.includes(d));
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-gray-600">年</label>
+          <select className="input-field text-sm py-2" value={year} onChange={(e) => setYear(Number(e.target.value))}>
+            {[today.getFullYear(), today.getFullYear() + 1].map((y) => (
+              <option key={y} value={y}>{y}年</option>
+            ))}
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-gray-600">月</label>
+          <select className="input-field text-sm py-2" value={month} onChange={(e) => setMonth(Number(e.target.value))}>
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+              <option key={m} value={m}>{m}月</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-gray-600">練習曜日</label>
+        <div className="flex gap-2 flex-wrap">
+          {WEEKDAYS.map((wd, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => toggleWeekday(i)}
+              className={`w-9 h-9 rounded-full text-sm font-semibold border-2 transition-colors
+                ${selectedWeekdays.includes(i)
+                  ? 'bg-blue-600 border-blue-600 text-white'
+                  : 'bg-white border-gray-200 text-gray-600'}`}
+            >
+              {wd}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-gray-600">定員（全日共通）</label>
+        <input
+          type="number"
+          className="input-field text-sm py-2"
+          min="1" max="100"
+          value={capacity}
+          onChange={(e) => setCapacity(e.target.value)}
+        />
+      </div>
+
+      {preview.length > 0 && (
+        <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
+          <div className="text-xs font-semibold text-gray-600">
+            プレビュー：{newDates.length}件追加（{preview.length - newDates.length}件はスキップ）
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {preview.map((d) => {
+              const exists = existingDates.includes(d);
+              return (
+                <span key={d} className={`text-xs px-2 py-0.5 rounded-full ${exists ? 'bg-gray-200 text-gray-400' : 'bg-blue-100 text-blue-700'}`}>
+                  {format(parseISO(d), 'M/d(E)', { locale: ja })}
+                  {exists ? ' 済' : ''}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={handleBatchAdd}
+        disabled={loading || newDates.length === 0}
+        className="btn-primary py-2.5 text-sm"
+      >
+        {loading ? '追加中...' : `${newDates.length}件の練習日を一括追加`}
+      </button>
+    </div>
+  );
+}
+
 // ─── Admin panel ──────────────────────────────────────────────────────────────
+const TABS = { SINGLE: 'single', BATCH: 'batch' };
+
 export default function AdminPanel({ onLogout }) {
   const [sessions, setSessions] = useState([]);
-  const [tab, setTab] = useState(TABS.SESSIONS);
+  const [addTab, setAddTab] = useState(TABS.SINGLE);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -259,28 +403,31 @@ export default function AdminPanel({ onLogout }) {
   async function handleAddSession(data) {
     await createSession(data);
   }
-
   async function handleDeleteSession(id) {
-    if (!confirm('この練習日を削除しますか？')) return;
     await deleteSession(id);
   }
-
   async function handleCancelReg(registrationId) {
     await cancelRegistration(registrationId);
   }
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
   const upcomingSessions = sessions.filter((s) => parseISO(s.date) >= today);
   const pastSessions = sessions.filter((s) => parseISO(s.date) < today);
+  const existingDates = sessions.map((s) => s.date);
+
+  const totalConfirmed = upcomingSessions.reduce((sum, s) => sum + s.confirmedCount, 0);
+  const totalWaiting = upcomingSessions.reduce((sum, s) => sum + s.waitlistCount, 0);
 
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="px-4 py-3 flex items-center justify-between max-w-lg mx-auto">
-          <h1 className="text-base font-bold text-gray-900">管理者画面</h1>
+          <div className="flex items-center gap-2">
+            <span className="text-xl">🏓</span>
+            <h1 className="text-base font-bold text-gray-900">管理者画面</h1>
+          </div>
           <button onClick={onLogout} className="flex items-center gap-1 text-gray-500 text-sm">
             <LogOut className="w-4 h-4" />
             ログアウト
@@ -288,25 +435,67 @@ export default function AdminPanel({ onLogout }) {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-5 space-y-4">
+      <div className="max-w-lg mx-auto px-4 py-5 space-y-5">
+        {/* Summary stats */}
+        {!loading && upcomingSessions.length > 0 && (
+          <div className="grid grid-cols-3 gap-3">
+            <div className="card text-center py-3">
+              <div className="text-xl font-bold text-blue-600">{upcomingSessions.length}</div>
+              <div className="text-xs text-gray-500 mt-0.5">今後の練習</div>
+            </div>
+            <div className="card text-center py-3">
+              <div className="text-xl font-bold text-green-600">{totalConfirmed}</div>
+              <div className="text-xs text-gray-500 mt-0.5">参加確定</div>
+            </div>
+            <div className="card text-center py-3">
+              <div className="text-xl font-bold text-yellow-600">{totalWaiting}</div>
+              <div className="text-xs text-gray-500 mt-0.5">キャンセル待ち</div>
+            </div>
+          </div>
+        )}
+
         {/* Add session */}
-        <AddSessionForm onAdd={handleAddSession} />
+        <div className="card space-y-4">
+          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-blue-500" />
+            練習日を追加
+          </h3>
+          <div className="flex border border-gray-200 rounded-xl overflow-hidden text-sm">
+            <button
+              onClick={() => setAddTab(TABS.SINGLE)}
+              className={`flex-1 py-2 font-medium transition-colors ${addTab === TABS.SINGLE ? 'bg-blue-600 text-white' : 'text-gray-600'}`}
+            >
+              1日ずつ
+            </button>
+            <button
+              onClick={() => setAddTab(TABS.BATCH)}
+              className={`flex-1 py-2 font-medium transition-colors ${addTab === TABS.BATCH ? 'bg-blue-600 text-white' : 'text-gray-600'}`}
+            >
+              月ごと一括
+            </button>
+          </div>
+
+          {addTab === TABS.SINGLE && (
+            <AddSessionForm onAdd={handleAddSession} />
+          )}
+          {addTab === TABS.BATCH && (
+            <MonthlyBatchForm existingDates={existingDates} onAdd={handleAddSession} />
+          )}
+        </div>
 
         {/* Upcoming sessions */}
         <div className="space-y-3">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">
-            今後の練習日 ({upcomingSessions.length}件)
+          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center justify-between">
+            <span>今後の練習日 ({upcomingSessions.length}件)</span>
           </h2>
-          {loading && (
-            <div className="text-center text-gray-400 text-sm py-8">読み込み中...</div>
-          )}
+          {loading && <div className="text-center text-gray-400 text-sm py-8">読み込み中...</div>}
           {!loading && upcomingSessions.length === 0 && (
             <div className="card text-center text-gray-400 text-sm py-8">
               練習日が登録されていません
             </div>
           )}
           {upcomingSessions.map((s) => (
-            <SessionCard key={s.id} session={s} onCancelReg={handleCancelReg} />
+            <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} />
           ))}
         </div>
 
@@ -314,16 +503,14 @@ export default function AdminPanel({ onLogout }) {
         {pastSessions.length > 0 && (
           <div className="space-y-3">
             <h2 className="text-sm font-bold text-gray-400 uppercase tracking-wide">
-              過去の練習日
+              過去の練習日 ({pastSessions.length}件)
             </h2>
-            {pastSessions.map((s) => (
+            {pastSessions.slice().reverse().map((s) => (
               <div key={s.id} className="card opacity-60">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="font-medium text-sm">{fmtDate(s.date)}</div>
-                    <div className="text-xs text-gray-500">
-                      参加 {s.confirmedCount} / {s.capacity} 人
-                    </div>
+                    <div className="text-xs text-gray-500">参加 {s.confirmedCount} / {s.capacity} 人</div>
                   </div>
                   <button
                     onClick={() => handleDeleteSession(s.id)}

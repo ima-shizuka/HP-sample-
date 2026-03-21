@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { ja } from 'date-fns/locale';
-import { Plus, Trash2, ChevronDown, ChevronUp, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Plus, Trash2, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { registerForSession } from '../lib/db';
 
 const STATUS = { YES: 'yes', NO: 'no', UNSET: 'unset' };
@@ -14,7 +14,8 @@ export default function RegistrationForm({ sessions }) {
   const [submitting, setSubmitting] = useState(false);
   const [results, setResults] = useState(null);
   const [errors, setErrors] = useState({});
-  const [waitlistConfirm, setWaitlistConfirm] = useState(null);
+  // waitlistModal: null | Array<{child, session}> — full sessions needing confirmation
+  const [waitlistModal, setWaitlistModal] = useState(null);
 
   const upcomingSessions = sessions.filter((s) => {
     const d = parseISO(s.date);
@@ -26,26 +27,22 @@ export default function RegistrationForm({ sessions }) {
   function addChild() {
     setChildren((c) => [...c, { name: '' }]);
   }
-
   function removeChild(idx) {
     setChildren((c) => c.filter((_, i) => i !== idx));
     setSelections((prev) => {
       const next = { ...prev };
-      Object.keys(next).forEach((key) => {
-        if (key.startsWith(`${idx}-`)) delete next[key];
+      Object.keys(next).forEach((k) => {
+        if (k.startsWith(`${idx}-`)) delete next[k];
       });
       return next;
     });
   }
-
   function setChildName(idx, val) {
     setChildren((c) => c.map((ch, i) => (i === idx ? { ...ch, name: val } : ch)));
   }
-
   function setSelection(childIdx, sessionId, val) {
     setSelections((prev) => ({ ...prev, [`${childIdx}-${sessionId}`]: val }));
   }
-
   function getSelection(childIdx, sessionId) {
     return selections[`${childIdx}-${sessionId}`] || STATUS.UNSET;
   }
@@ -56,9 +53,18 @@ export default function RegistrationForm({ sessions }) {
     children.forEach((ch, i) => {
       if (!ch.name.trim()) errs[`child-${i}`] = '子供の名前を入力してください';
     });
-    const hasAnySelection = Object.values(selections).some((v) => v === STATUS.YES);
-    if (!hasAnySelection) errs.selections = '少なくとも1つの練習日に「参加」を選択してください';
+    const hasAny = Object.values(selections).some((v) => v === STATUS.YES);
+    if (!hasAny) errs.selections = '少なくとも1つの練習日に「参加」を選択してください';
     return errs;
+  }
+
+  // Build the list of (child, session) pairs where user selected YES
+  function buildToRegister() {
+    return children.flatMap((ch, ci) =>
+      upcomingSessions
+        .filter((s) => getSelection(ci, s.id) === STATUS.YES)
+        .map((s) => ({ child: ch, session: s, isFull: s.confirmedCount >= s.capacity }))
+    );
   }
 
   async function handleSubmit(e) {
@@ -70,33 +76,28 @@ export default function RegistrationForm({ sessions }) {
     }
     setErrors({});
 
-    // Check if any selected sessions are full → show waitlist confirm
-    const toRegister = [];
-    children.forEach((ch, ci) => {
-      upcomingSessions.forEach((s) => {
-        if (getSelection(ci, s.id) === STATUS.YES) {
-          const isFull = s.confirmedCount >= s.capacity;
-          toRegister.push({ child: ch, childIdx: ci, session: s, isFull });
-        }
-      });
-    });
+    const toRegister = buildToRegister();
+    const fullItems = toRegister.filter((r) => r.isFull);
 
-    const fullSessions = toRegister.filter((r) => r.isFull);
-    if (fullSessions.length > 0 && waitlistConfirm === null) {
-      setWaitlistConfirm(fullSessions);
+    // If any full sessions, confirm waitlist preference first
+    if (fullItems.length > 0) {
+      setWaitlistModal(fullItems);
       return;
     }
 
-    await submitAll(toRegister);
+    // No full sessions — submit directly
+    await submitAll(toRegister, true);
   }
 
-  async function submitAll(toRegister) {
+  // allowWaitlist: true = register on waitlist for full sessions,
+  //               false = skip full sessions
+  async function submitAll(toRegister, allowWaitlist) {
     setSubmitting(true);
+    setWaitlistModal(null);
     const res = [];
     try {
       for (const { child, session, isFull } of toRegister) {
-        const forceWaitlist = isFull && waitlistConfirm !== null && waitlistConfirm !== 'skip';
-        if (isFull && waitlistConfirm === 'skip') {
+        if (isFull && !allowWaitlist) {
           res.push({ child, session, status: 'skipped' });
           continue;
         }
@@ -110,7 +111,6 @@ export default function RegistrationForm({ sessions }) {
         res.push({ child, session, ...result });
       }
       setResults(res);
-      setWaitlistConfirm(null);
     } catch (err) {
       console.error(err);
       setErrors({ submit: '送信中にエラーが発生しました。再度お試しください。' });
@@ -126,14 +126,15 @@ export default function RegistrationForm({ sessions }) {
     setSelections({});
     setResults(null);
     setErrors({});
-    setWaitlistConfirm(null);
+    setWaitlistModal(null);
   }
 
   const remaining = (s) => Math.max(0, s.capacity - s.confirmedCount);
   const fmtDate = (d) => format(parseISO(d), 'M月d日(E)', { locale: ja });
 
-  // ── Waitlist confirmation modal
-  if (waitlistConfirm && waitlistConfirm !== 'skip') {
+  // ── Waitlist confirmation modal ───────────────────────────────────────────
+  if (waitlistModal) {
+    const allToRegister = buildToRegister();
     return (
       <div className="fixed inset-0 bg-black/50 flex items-end justify-center z-50 p-4">
         <div className="bg-white rounded-2xl p-6 w-full max-w-lg space-y-4">
@@ -145,12 +146,12 @@ export default function RegistrationForm({ sessions }) {
             以下の日程は定員に達しています。キャンセル待ちに登録しますか？
           </p>
           <ul className="space-y-2">
-            {waitlistConfirm.map(({ child, session }, i) => (
+            {waitlistModal.map(({ child, session }, i) => (
               <li key={i} className="flex items-center gap-2 text-sm bg-yellow-50 rounded-lg p-3">
                 <span className="font-medium">{fmtDate(session.date)}</span>
-                <span className="text-gray-500">-</span>
+                <span className="text-gray-400">—</span>
                 <span>{child.name}</span>
-                <span className="ml-auto text-yellow-700 text-xs">
+                <span className="ml-auto text-yellow-700 text-xs font-medium">
                   待ち {session.waitlistCount + 1} 番目
                 </span>
               </li>
@@ -158,38 +159,34 @@ export default function RegistrationForm({ sessions }) {
           </ul>
           <div className="grid grid-cols-2 gap-3 pt-2">
             <button
-              onClick={() => { setWaitlistConfirm('skip'); submitAll(
-                children.flatMap((ch, ci) =>
-                  upcomingSessions
-                    .filter(() => getSelection(ci, upcomingSessions[0]?.id) !== STATUS.UNSET)
-                    .map((s) => ({ child: ch, childIdx: ci, session: s, isFull: s.confirmedCount >= s.capacity }))
-                ).filter(({ session, childIdx }) => getSelection(childIdx, session.id) === STATUS.YES)
-              ); }}
+              onClick={() => submitAll(allToRegister, false)}
               className="btn-secondary text-sm py-3"
+              disabled={submitting}
             >
               キャンセル待ちしない
             </button>
             <button
-              onClick={() => {
-                const all = children.flatMap((ch, ci) =>
-                  upcomingSessions
-                    .filter((s) => getSelection(ci, s.id) === STATUS.YES)
-                    .map((s) => ({ child: ch, childIdx: ci, session: s, isFull: s.confirmedCount >= s.capacity }))
-                );
-                submitAll(all);
-              }}
+              onClick={() => submitAll(allToRegister, true)}
               className="btn-primary text-sm py-3"
+              disabled={submitting}
             >
-              キャンセル待ちする
+              {submitting ? '登録中...' : 'キャンセル待ちする'}
             </button>
           </div>
+          <button
+            onClick={() => setWaitlistModal(null)}
+            className="text-gray-400 text-xs text-center w-full"
+          >
+            戻る
+          </button>
         </div>
       </div>
     );
   }
 
-  // ── Success screen
+  // ── Success screen ─────────────────────────────────────────────────────────
   if (results) {
+    const hasWaitlisted = results.some((r) => r.status === 'waitlisted');
     return (
       <div className="p-4 space-y-4">
         <div className="card space-y-4">
@@ -206,20 +203,25 @@ export default function RegistrationForm({ sessions }) {
                   <div className="text-gray-500 text-xs">{r.child.name}</div>
                 </div>
                 <div>
-                  {r.status === 'confirmed' && <span className="badge-confirmed">参加確定</span>}
+                  {r.status === 'confirmed' && (
+                    <span className="badge-confirmed">参加確定</span>
+                  )}
                   {r.status === 'waitlisted' && (
                     <span className="badge-waitlist">
                       キャンセル待ち {r.waitlistPosition} 番
                     </span>
                   )}
-                  {r.status === 'skipped' && <span className="badge-cancelled">未登録</span>}
+                  {r.status === 'skipped' && (
+                    <span className="badge-cancelled">未登録</span>
+                  )}
                 </div>
               </div>
             ))}
           </div>
-          {results.some((r) => r.status === 'waitlisted') && (
+          {hasWaitlisted && (
             <div className="bg-blue-50 rounded-xl p-3 text-sm text-blue-800">
               キャンセル待ちの場合、空きが出た際にメールでご連絡します。
+              {email ? '' : '（通知を受け取るにはメールアドレスの入力をお勧めします）'}
             </div>
           )}
         </div>
@@ -230,7 +232,7 @@ export default function RegistrationForm({ sessions }) {
     );
   }
 
-  // ── Main form
+  // ── Main form ──────────────────────────────────────────────────────────────
   return (
     <form onSubmit={handleSubmit} className="p-4 space-y-5">
       {/* Parent info */}
@@ -251,10 +253,12 @@ export default function RegistrationForm({ sessions }) {
         </div>
         <div className="space-y-1">
           <label className="text-sm font-medium text-gray-700">
-            メールアドレス <span className="text-gray-400 text-xs">（通知受信用）</span>
+            メールアドレス{' '}
+            <span className="text-gray-400 text-xs">（空き通知・リマインド受信用）</span>
           </label>
           <input
             type="email"
+            inputMode="email"
             className="input-field"
             placeholder="example@email.com"
             value={email}
@@ -273,34 +277,34 @@ export default function RegistrationForm({ sessions }) {
             className="flex items-center gap-1 text-blue-600 text-sm font-medium"
           >
             <Plus className="w-4 h-4" />
-            追加
+            兄弟を追加
           </button>
         </div>
         {children.map((ch, i) => (
-          <div key={i} className="flex gap-2 items-center">
-            <input
-              type="text"
-              className="input-field"
-              placeholder={`子供 ${i + 1} の名前`}
-              value={ch.name}
-              onChange={(e) => setChildName(i, e.target.value)}
-            />
-            {children.length > 1 && (
-              <button
-                type="button"
-                onClick={() => removeChild(i)}
-                className="text-red-400 p-2 shrink-0"
-              >
-                <Trash2 className="w-5 h-5" />
-              </button>
+          <div key={i} className="space-y-1">
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                className="input-field"
+                placeholder={`子供 ${i + 1} の名前`}
+                value={ch.name}
+                onChange={(e) => setChildName(i, e.target.value)}
+              />
+              {children.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => removeChild(i)}
+                  className="text-red-400 p-2 shrink-0"
+                >
+                  <Trash2 className="w-5 h-5" />
+                </button>
+              )}
+            </div>
+            {errors[`child-${i}`] && (
+              <p className="text-red-500 text-xs">{errors[`child-${i}`]}</p>
             )}
           </div>
         ))}
-        {children.map((_, i) =>
-          errors[`child-${i}`] ? (
-            <p key={i} className="text-red-500 text-xs">{errors[`child-${i}`]}</p>
-          ) : null
-        )}
       </div>
 
       {/* Session selections */}
@@ -309,63 +313,68 @@ export default function RegistrationForm({ sessions }) {
         {errors.selections && (
           <p className="text-red-500 text-xs px-1">{errors.selections}</p>
         )}
-        {upcomingSessions.length === 0 && (
+        {upcomingSessions.length === 0 ? (
           <div className="card text-center text-gray-500 text-sm py-8">
             現在登録可能な練習日がありません
           </div>
-        )}
-        {upcomingSessions.map((session) => {
-          const rem = remaining(session);
-          const isFull = rem === 0;
-          return (
-            <div key={session.id} className="card space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-gray-900">{fmtDate(session.date)}</div>
-                  <div className={`text-xs mt-0.5 ${isFull ? 'text-red-600 font-medium' : 'text-gray-500'}`}>
-                    {isFull ? '定員に達しています' : `残り ${rem} 人`}
-                  </div>
-                </div>
-                <div className="text-xs text-gray-400">定員 {session.capacity}人</div>
-              </div>
-
-              {children.map((ch, ci) => {
-                const sel = getSelection(ci, session.id);
-                return (
-                  <div key={ci} className="space-y-1">
-                    {children.length > 1 && (
-                      <div className="text-xs font-medium text-gray-500">
-                        {ch.name || `子供 ${ci + 1}`}
-                      </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setSelection(ci, session.id, STATUS.YES)}
-                        className={`py-2.5 rounded-xl text-sm font-semibold border-2 transition-colors
-                          ${sel === STATUS.YES
-                            ? 'bg-blue-600 border-blue-600 text-white'
-                            : 'bg-white border-gray-200 text-gray-600'}`}
-                      >
-                        ○ 参加
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSelection(ci, session.id, STATUS.NO)}
-                        className={`py-2.5 rounded-xl text-sm font-semibold border-2 transition-colors
-                          ${sel === STATUS.NO
-                            ? 'bg-gray-500 border-gray-500 text-white'
-                            : 'bg-white border-gray-200 text-gray-600'}`}
-                      >
-                        × 不参加
-                      </button>
+        ) : (
+          upcomingSessions.map((session) => {
+            const rem = remaining(session);
+            const isFull = rem === 0;
+            return (
+              <div key={session.id} className="card space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-gray-900">{fmtDate(session.date)}</div>
+                    <div
+                      className={`text-xs mt-0.5 font-medium ${
+                        isFull ? 'text-red-600' : rem <= 3 ? 'text-orange-500' : 'text-green-600'
+                      }`}
+                    >
+                      {isFull ? '定員に達しています（キャンセル待ち可）' : `残り ${rem} 人`}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          );
-        })}
+                  <div className="text-xs text-gray-400 shrink-0">定員 {session.capacity}人</div>
+                </div>
+
+                {children.map((ch, ci) => {
+                  const sel = getSelection(ci, session.id);
+                  return (
+                    <div key={ci} className="space-y-1">
+                      {children.length > 1 && (
+                        <div className="text-xs font-medium text-gray-500">
+                          {ch.name || `子供 ${ci + 1}`}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelection(ci, session.id, STATUS.YES)}
+                          className={`py-2.5 rounded-xl text-sm font-semibold border-2 transition-colors
+                            ${sel === STATUS.YES
+                              ? 'bg-blue-600 border-blue-600 text-white'
+                              : 'bg-white border-gray-200 text-gray-600'}`}
+                        >
+                          ○ 参加
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelection(ci, session.id, STATUS.NO)}
+                          className={`py-2.5 rounded-xl text-sm font-semibold border-2 transition-colors
+                            ${sel === STATUS.NO
+                              ? 'bg-gray-500 border-gray-500 text-white'
+                              : 'bg-white border-gray-200 text-gray-600'}`}
+                        >
+                          × 不参加
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })
+        )}
       </div>
 
       {errors.submit && (
