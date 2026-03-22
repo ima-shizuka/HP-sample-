@@ -12,7 +12,7 @@ function Header() {
       <div className="flex items-center gap-3">
         <span className="text-2xl">🏓</span>
         <div>
-          <h1 className="text-lg font-bold leading-tight">卓球クラブ練習管理</h1>
+          <h1 className="text-lg font-bold leading-tight">細江卓研 休日強化練習予約フォーム</h1>
           <p className="text-blue-200 text-xs">練習参加の出欠登録</p>
         </div>
       </div>

@@ -8,7 +8,6 @@ const STATUS = { YES: 'yes', NO: 'no', UNSET: 'unset' };
 
 export default function RegistrationForm({ sessions }) {
   const [parentName, setParentName] = useState('');
-  const [email, setEmail] = useState('');
   const [children, setChildren] = useState([{ name: '' }]);
   const [selections, setSelections] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -105,7 +104,6 @@ export default function RegistrationForm({ sessions }) {
           sessionId: session.id,
           parentName: parentName.trim(),
           childName: child.name.trim(),
-          email: email.trim() || null,
           forceWaitlist: isFull,
         });
         res.push({ child, session, ...result });
@@ -121,7 +119,6 @@ export default function RegistrationForm({ sessions }) {
 
   function reset() {
     setParentName('');
-    setEmail('');
     setChildren([{ name: '' }]);
     setSelections({});
     setResults(null);
@@ -220,8 +217,7 @@ export default function RegistrationForm({ sessions }) {
           </div>
           {hasWaitlisted && (
             <div className="bg-blue-50 rounded-xl p-3 text-sm text-blue-800">
-              キャンセル待ちの場合、空きが出た際にメールでご連絡します。
-              {email ? '' : '（通知を受け取るにはメールアドレスの入力をお勧めします）'}
+              キャンセル待ちの場合、空きが出た際にご連絡します。
             </div>
           )}
         </div>
@@ -250,20 +246,6 @@ export default function RegistrationForm({ sessions }) {
             onChange={(e) => setParentName(e.target.value)}
           />
           {errors.parentName && <p className="text-red-500 text-xs">{errors.parentName}</p>}
-        </div>
-        <div className="space-y-1">
-          <label className="text-sm font-medium text-gray-700">
-            メールアドレス{' '}
-            <span className="text-gray-400 text-xs">（空き通知・リマインド受信用）</span>
-          </label>
-          <input
-            type="email"
-            inputMode="email"
-            className="input-field"
-            placeholder="example@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
         </div>
       </div>
 
@@ -326,6 +308,11 @@ export default function RegistrationForm({ sessions }) {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="font-semibold text-gray-900">{fmtDate(session.date)}</div>
+                    {(session.startTime || session.endTime) && (
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {session.startTime}{session.startTime && session.endTime ? '〜' : ''}{session.endTime}
+                      </div>
+                    )}
                     <div
                       className={`text-xs mt-0.5 font-medium ${
                         isFull ? 'text-red-600' : rem <= 3 ? 'text-orange-500' : 'text-green-600'

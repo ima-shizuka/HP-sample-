@@ -130,6 +130,11 @@ function SessionCard({ session, onDelete, onCancelReg }) {
       >
         <div className="text-left">
           <div className="font-semibold text-gray-900">{fmtDate(session.date)}</div>
+          {(session.startTime || session.endTime) && (
+            <div className="text-xs text-gray-500 mt-0.5">
+              {session.startTime}{session.startTime && session.endTime ? '〜' : ''}{session.endTime}
+            </div>
+          )}
           <div className="flex items-center gap-3 mt-1">
             <span className="flex items-center gap-1 text-xs text-gray-500">
               <Users className="w-3.5 h-3.5" />
@@ -208,6 +213,8 @@ function SessionCard({ session, onDelete, onCancelReg }) {
 // ─── Add single session form ───────────────────────────────────────────────────
 function AddSessionForm({ onAdd }) {
   const [date, setDate] = useState('');
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [capacity, setCapacity] = useState(20);
   const [loading, setLoading] = useState(false);
 
@@ -216,39 +223,63 @@ function AddSessionForm({ onAdd }) {
     if (!date) return;
     setLoading(true);
     try {
-      await onAdd({ date, capacity: Number(capacity) });
+      await onAdd({ date, startTime, endTime, capacity: Number(capacity) });
       setDate('');
+      setStartTime('');
+      setEndTime('');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-end">
-      <div className="flex-1 space-y-1">
-        <label className="text-xs font-medium text-gray-600">日付</label>
-        <input
-          type="date"
-          className="input-field text-sm py-2"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          required
-        />
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="flex gap-2 items-end">
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-medium text-gray-600">日付</label>
+          <input
+            type="date"
+            className="input-field text-sm py-2"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            required
+          />
+        </div>
+        <div className="w-20 space-y-1">
+          <label className="text-xs font-medium text-gray-600">定員</label>
+          <input
+            type="number"
+            className="input-field text-sm py-2"
+            min="1"
+            max="100"
+            value={capacity}
+            onChange={(e) => setCapacity(e.target.value)}
+          />
+        </div>
       </div>
-      <div className="w-20 space-y-1">
-        <label className="text-xs font-medium text-gray-600">定員</label>
-        <input
-          type="number"
-          className="input-field text-sm py-2"
-          min="1"
-          max="100"
-          value={capacity}
-          onChange={(e) => setCapacity(e.target.value)}
-        />
+      <div className="flex gap-2 items-end">
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-medium text-gray-600">開始時間</label>
+          <input
+            type="time"
+            className="input-field text-sm py-2"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+          />
+        </div>
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-medium text-gray-600">終了時間</label>
+          <input
+            type="time"
+            className="input-field text-sm py-2"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+          />
+        </div>
+        <button type="submit" disabled={loading || !date} className="btn-primary py-2.5 text-sm w-auto px-5">
+          {loading ? '...' : '追加'}
+        </button>
       </div>
-      <button type="submit" disabled={loading || !date} className="btn-primary py-2.5 text-sm w-auto px-5">
-        {loading ? '...' : '追加'}
-      </button>
     </form>
   );
 }
@@ -260,6 +291,8 @@ function MonthlyBatchForm({ existingDates, onAdd }) {
   const [month, setMonth] = useState(today.getMonth() + 1);
   const [selectedWeekdays, setSelectedWeekdays] = useState([6]); // Saturday default
   const [capacity, setCapacity] = useState(20);
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState([]);
 
@@ -293,7 +326,7 @@ function MonthlyBatchForm({ existingDates, onAdd }) {
     setLoading(true);
     try {
       for (const date of toAdd) {
-        await onAdd({ date, capacity: Number(capacity) });
+        await onAdd({ date, startTime, endTime, capacity: Number(capacity) });
       }
     } finally {
       setLoading(false);
@@ -342,6 +375,26 @@ function MonthlyBatchForm({ existingDates, onAdd }) {
         </div>
       </div>
 
+      <div className="flex gap-2">
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-medium text-gray-600">開始時間（全日共通）</label>
+          <input
+            type="time"
+            className="input-field text-sm py-2"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+          />
+        </div>
+        <div className="flex-1 space-y-1">
+          <label className="text-xs font-medium text-gray-600">終了時間（全日共通）</label>
+          <input
+            type="time"
+            className="input-field text-sm py-2"
+            value={endTime}
+            onChange={(e) => setEndTime(e.target.value)}
+          />
+        </div>
+      </div>
       <div className="space-y-1">
         <label className="text-xs font-medium text-gray-600">定員（全日共通）</label>
         <input

@@ -64,9 +64,11 @@ export async function getSession(id) {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
-export async function createSession({ date, capacity }) {
+export async function createSession({ date, startTime, endTime, capacity }) {
   return addDoc(sessionsRef(), {
     date,
+    startTime: startTime || null,
+    endTime: endTime || null,
     capacity,
     confirmedCount: 0,
     waitlistCount: 0,
