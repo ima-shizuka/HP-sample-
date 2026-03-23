@@ -72,6 +72,8 @@ export async function createSession({ date, startTime, endTime, capacity }) {
     capacity,
     confirmedCount: 0,
     waitlistCount: 0,
+    pendingUpgradeCount: 0,
+    isOpen: true,
     createdAt: serverTimestamp(),
   });
 }
@@ -179,19 +181,22 @@ export async function cancelRegistration(registrationId) {
 
     const reg = rSnap.data();
     const wasConfirmed = reg.status === 'confirmed';
+    const wasPendingUpgrade = reg.status === 'pending_upgrade';
 
     tx.update(rRef, { status: 'cancelled', updatedAt: serverTimestamp() });
 
     const sRef = sessionRef(reg.sessionId);
     if (wasConfirmed) {
       tx.update(sRef, { confirmedCount: increment(-1) });
+    } else if (wasPendingUpgrade) {
+      tx.update(sRef, { pendingUpgradeCount: increment(-1) });
     } else {
       tx.update(sRef, { waitlistCount: increment(-1) });
     }
 
-    // Find first waitlisted entry (ordered by createdAt — handled server-side)
+    // Find first waitlisted entry and promote (for confirmed OR pending_upgrade cancellations)
     let promoted = null;
-    if (wasConfirmed) {
+    if (wasConfirmed || wasPendingUpgrade) {
       const wq = query(
         registrationsRef(),
         where('sessionId', '==', reg.sessionId),
@@ -202,16 +207,36 @@ export async function cancelRegistration(registrationId) {
       if (!wSnap.empty) {
         const first = wSnap.docs[0];
         promoted = { id: first.id, ...first.data() };
-        // Mark as pending_upgrade so the notification function picks it up
         tx.update(doc(registrationsRef(), first.id), {
           status: 'pending_upgrade',
           updatedAt: serverTimestamp(),
         });
-        tx.update(sRef, { waitlistCount: increment(-1) });
+        tx.update(sRef, { waitlistCount: increment(-1), pendingUpgradeCount: increment(1) });
       }
     }
 
     return { promoted, sessionId: reg.sessionId };
+  });
+}
+
+/**
+ * Admin manually confirms a pending_upgrade registration.
+ */
+export async function adminConfirmUpgrade(registrationId) {
+  return runTransaction(db, async (tx) => {
+    const rRef = registrationRef(registrationId);
+    const rSnap = await tx.get(rRef);
+    if (!rSnap.exists()) throw new Error('登録が存在しません');
+    const reg = rSnap.data();
+    if (reg.status !== 'pending_upgrade') throw new Error('繰り上げ確認中の登録ではありません');
+
+    tx.update(rRef, { status: 'confirmed', waitlistPosition: null, updatedAt: serverTimestamp() });
+    tx.update(sessionRef(reg.sessionId), {
+      confirmedCount: increment(1),
+      pendingUpgradeCount: increment(-1),
+    });
+
+    return { registrationId };
   });
 }
 
@@ -239,7 +264,7 @@ export async function respondToUpgrade(notificationToken, accept) {
 
     if (accept) {
       tx.update(rRef, { status: 'confirmed', waitlistPosition: null, updatedAt: serverTimestamp() });
-      tx.update(sRef, { confirmedCount: increment(1) });
+      tx.update(sRef, { confirmedCount: increment(1), pendingUpgradeCount: increment(-1) });
       return { success: true, accepted: true };
     } else {
       tx.update(rRef, { status: 'cancelled', updatedAt: serverTimestamp() });
@@ -260,7 +285,11 @@ export async function respondToUpgrade(notificationToken, accept) {
           status: 'pending_upgrade',
           updatedAt: serverTimestamp(),
         });
+        // pendingUpgradeCount stays same: 1 declined (would -1), 1 new promoted (+1)
         tx.update(sRef, { waitlistCount: increment(-1) });
+      } else {
+        // No next person — slot is genuinely freed
+        tx.update(sRef, { pendingUpgradeCount: increment(-1) });
       }
       return { success: true, accepted: false, nextPromoted };
     }

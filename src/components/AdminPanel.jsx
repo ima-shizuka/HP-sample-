@@ -9,6 +9,8 @@ import {
   createSession,
   deleteSession,
   cancelRegistration,
+  adminConfirmUpgrade,
+  updateSession,
   subscribeToSessions,
   subscribeToRegistrations,
 } from '../lib/db';
@@ -34,8 +36,9 @@ function toCSV(regs, sessionDate) {
 }
 
 // ─── Registration row ─────────────────────────────────────────────────────────
-function RegistrationRow({ reg, onCancel }) {
+function RegistrationRow({ reg, onCancel, onConfirmUpgrade }) {
   const [cancelling, setCancelling] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   async function handleCancel() {
     if (!confirm(`${reg.childName} の登録をキャンセルしますか？\nキャンセル待ちがいる場合は自動で繰り上げ通知されます。`)) return;
@@ -44,6 +47,16 @@ function RegistrationRow({ reg, onCancel }) {
       await onCancel(reg.id);
     } finally {
       setCancelling(false);
+    }
+  }
+
+  async function handleConfirmUpgrade() {
+    if (!confirm(`${reg.childName} の繰り上げを確定しますか？`)) return;
+    setConfirming(true);
+    try {
+      await onConfirmUpgrade(reg.id);
+    } finally {
+      setConfirming(false);
     }
   }
 
@@ -60,7 +73,7 @@ function RegistrationRow({ reg, onCancel }) {
     }
   };
 
-  const canCancel = reg.status === 'confirmed' || reg.status === 'waitlisted';
+  const canCancel = ['confirmed', 'waitlisted', 'pending_upgrade'].includes(reg.status);
 
   return (
     <div className="flex items-center gap-2 py-2.5 border-b border-gray-50 last:border-0">
@@ -70,6 +83,16 @@ function RegistrationRow({ reg, onCancel }) {
         {reg.email && <div className="text-xs text-gray-400 truncate">{reg.email}</div>}
       </div>
       <div className="shrink-0">{statusBadge()}</div>
+      {reg.status === 'pending_upgrade' && (
+        <button
+          onClick={handleConfirmUpgrade}
+          disabled={confirming}
+          className="shrink-0 px-2 py-1 text-xs font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-lg disabled:opacity-50"
+          title="参加確定にする"
+        >
+          {confirming ? '...' : '確定'}
+        </button>
+      )}
       {canCancel && (
         <button
           onClick={handleCancel}
@@ -85,11 +108,12 @@ function RegistrationRow({ reg, onCancel }) {
 }
 
 // ─── Session card ─────────────────────────────────────────────────────────────
-function SessionCard({ session, onDelete, onCancelReg }) {
+function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggleOpen }) {
   const [expanded, setExpanded] = useState(false);
   const [regs, setRegs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [togglingOpen, setTogglingOpen] = useState(false);
 
   useEffect(() => {
     if (!expanded) return;
@@ -118,9 +142,17 @@ function SessionCard({ session, onDelete, onCancelReg }) {
     try { await onDelete(session.id); } finally { setDeleting(false); }
   }
 
+  async function handleToggleOpen() {
+    const willOpen = session.isOpen === false;
+    if (!confirm(willOpen ? '募集を再開しますか？' : '募集を停止しますか？\n保護者向けページから非表示になります。')) return;
+    setTogglingOpen(true);
+    try { await onToggleOpen(session.id, willOpen); } finally { setTogglingOpen(false); }
+  }
+
+  const pendingCount = session.pendingUpgradeCount || 0;
   const confirmed = regs.filter((r) => r.status === 'confirmed' || r.status === 'pending_upgrade');
   const waitlisted = regs.filter((r) => r.status === 'waitlisted');
-  const rem = Math.max(0, session.capacity - session.confirmedCount);
+  const rem = Math.max(0, session.capacity - session.confirmedCount - pendingCount);
 
   return (
     <div className="card space-y-3">
@@ -135,12 +167,17 @@ function SessionCard({ session, onDelete, onCancelReg }) {
               {session.startTime}{session.startTime && session.endTime ? '〜' : ''}{session.endTime}
             </div>
           )}
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex items-center gap-3 mt-1 flex-wrap">
             <span className="flex items-center gap-1 text-xs text-gray-500">
               <Users className="w-3.5 h-3.5" />
               {session.confirmedCount} / {session.capacity} 人
             </span>
-            {rem > 0 ? (
+            {pendingCount > 0 ? (
+              <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">
+                <Bell className="w-3 h-3" />
+                繰り上げ確認中 {pendingCount} 人
+              </span>
+            ) : rem > 0 ? (
               <span className="text-xs text-green-600 font-medium">残り {rem} 人</span>
             ) : (
               <span className="text-xs text-red-600 font-medium">定員満了</span>
@@ -151,9 +188,24 @@ function SessionCard({ session, onDelete, onCancelReg }) {
                 待ち {session.waitlistCount} 人
               </span>
             )}
+            {session.isOpen === false && (
+              <span className="text-xs text-gray-400 font-medium">募集停止中</span>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); handleToggleOpen(); }}
+            disabled={togglingOpen}
+            className={`p-1.5 text-xs font-medium rounded-lg disabled:opacity-50 ${
+              session.isOpen === false
+                ? 'text-gray-500 bg-gray-100 hover:bg-gray-200'
+                : 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+            }`}
+            title={session.isOpen === false ? '募集再開' : '募集停止'}
+          >
+            {session.isOpen === false ? '再開' : '停止'}
+          </button>
           <button
             onClick={(e) => { e.stopPropagation(); handleDelete(); }}
             disabled={deleting}
@@ -176,7 +228,7 @@ function SessionCard({ session, onDelete, onCancelReg }) {
                 参加確定 ({confirmed.length}人)
               </div>
               {confirmed.map((r) => (
-                <RegistrationRow key={r.id} reg={r} onCancel={onCancelReg} />
+                <RegistrationRow key={r.id} reg={r} onCancel={onCancelReg} onConfirmUpgrade={onConfirmUpgrade} />
               ))}
             </div>
           )}
@@ -189,7 +241,7 @@ function SessionCard({ session, onDelete, onCancelReg }) {
               {[...waitlisted]
                 .sort((a, b) => (a.waitlistPosition || 0) - (b.waitlistPosition || 0))
                 .map((r) => (
-                  <RegistrationRow key={r.id} reg={r} onCancel={onCancelReg} />
+                  <RegistrationRow key={r.id} reg={r} onCancel={onCancelReg} onConfirmUpgrade={onConfirmUpgrade} />
                 ))}
             </div>
           )}
@@ -462,6 +514,12 @@ export default function AdminPanel({ onLogout }) {
   async function handleCancelReg(registrationId) {
     await cancelRegistration(registrationId);
   }
+  async function handleConfirmUpgrade(registrationId) {
+    await adminConfirmUpgrade(registrationId);
+  }
+  async function handleToggleOpen(sessionId, willOpen) {
+    await updateSession(sessionId, { isOpen: willOpen });
+  }
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -548,7 +606,7 @@ export default function AdminPanel({ onLogout }) {
             </div>
           )}
           {upcomingSessions.map((s) => (
-            <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} />
+            <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} onConfirmUpgrade={handleConfirmUpgrade} onToggleOpen={handleToggleOpen} />
           ))}
         </div>
 
@@ -560,7 +618,7 @@ export default function AdminPanel({ onLogout }) {
               過去の練習履歴 ({pastSessions.length}件)
             </h2>
             {pastSessions.slice().reverse().map((s) => (
-              <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} />
+              <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} onConfirmUpgrade={handleConfirmUpgrade} onToggleOpen={handleToggleOpen} />
             ))}
           </div>
         )}

@@ -19,7 +19,7 @@ export default function RegistrationForm({ sessions }) {
     const d = parseISO(s.date);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return d >= today;
+    return d >= today && s.isOpen !== false;
   });
 
   function addChild() {
@@ -55,12 +55,15 @@ export default function RegistrationForm({ sessions }) {
     return errs;
   }
 
+  const isEffectivelyFull = (s) =>
+    (s.confirmedCount + (s.pendingUpgradeCount || 0)) >= s.capacity;
+
   // Build the list of (child, session) pairs where user selected YES
   function buildToRegister() {
     return children.flatMap((ch, ci) =>
       upcomingSessions
         .filter((s) => getSelection(ci, s.id) === STATUS.YES)
-        .map((s) => ({ child: ch, session: s, isFull: s.confirmedCount >= s.capacity }))
+        .map((s) => ({ child: ch, session: s, isFull: isEffectivelyFull(s) }))
     );
   }
 
@@ -105,6 +108,11 @@ export default function RegistrationForm({ sessions }) {
         });
         res.push({ child, session, ...result });
       }
+      // キャンセル待ちしないを選択してすべてスキップされた場合は通常画面に戻る
+      if (res.every((r) => r.status === 'skipped')) {
+        reset();
+        return;
+      }
       setResults(res);
     } catch (err) {
       console.error(err);
@@ -122,7 +130,7 @@ export default function RegistrationForm({ sessions }) {
     setWaitlistModal(null);
   }
 
-  const remaining = (s) => Math.max(0, s.capacity - s.confirmedCount);
+  const remaining = (s) => Math.max(0, s.capacity - s.confirmedCount - (s.pendingUpgradeCount || 0));
   const fmtDate = (d) => format(parseISO(d), 'M月d日(E)', { locale: ja });
 
   // ── Waitlist confirmation modal ───────────────────────────────────────────
@@ -283,7 +291,8 @@ export default function RegistrationForm({ sessions }) {
         ) : (
           upcomingSessions.map((session) => {
             const rem = remaining(session);
-            const isFull = rem === 0;
+            const isFull = isEffectivelyFull(session);
+            const pendingCount = session.pendingUpgradeCount || 0;
             return (
               <div key={session.id} className="card space-y-3">
                 <div className="flex items-center justify-between">
@@ -294,13 +303,19 @@ export default function RegistrationForm({ sessions }) {
                         {session.startTime}{session.startTime && session.endTime ? '〜' : ''}{session.endTime}
                       </div>
                     )}
-                    <div
-                      className={`text-xs mt-0.5 font-medium ${
-                        isFull ? 'text-red-600' : rem <= 3 ? 'text-orange-500' : 'text-green-600'
-                      }`}
-                    >
-                      {isFull ? '定員に達しています（キャンセル待ち可）' : `残り ${rem} 人`}
-                    </div>
+                    {pendingCount > 0 ? (
+                      <div className="text-xs mt-0.5 font-medium text-blue-600">
+                        現在{pendingCount}人繰り上げ確認中
+                      </div>
+                    ) : (
+                      <div
+                        className={`text-xs mt-0.5 font-medium ${
+                          isFull ? 'text-red-600' : rem <= 3 ? 'text-orange-500' : 'text-green-600'
+                        }`}
+                      >
+                        {isFull ? '定員に達しています（キャンセル待ち可）' : `残り ${rem} 人`}
+                      </div>
+                    )}
                   </div>
                   <div className="text-xs text-gray-400 shrink-0">定員 {session.capacity}人</div>
                 </div>
