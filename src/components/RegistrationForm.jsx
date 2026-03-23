@@ -7,7 +7,6 @@ import { registerForSession } from '../lib/db';
 const STATUS = { YES: 'yes', NO: 'no', UNSET: 'unset' };
 
 export default function RegistrationForm({ sessions }) {
-  const [parentName, setParentName] = useState('');
   const [children, setChildren] = useState([{ name: '' }]);
   const [selections, setSelections] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -48,9 +47,8 @@ export default function RegistrationForm({ sessions }) {
 
   function validate() {
     const errs = {};
-    if (!parentName.trim()) errs.parentName = '保護者名を入力してください';
     children.forEach((ch, i) => {
-      if (!ch.name.trim()) errs[`child-${i}`] = '子供の名前を入力してください';
+      if (!ch.name.trim()) errs[`child-${i}`] = '生徒の名前（漢字フルネーム）を入力してください';
     });
     const hasAny = Object.values(selections).some((v) => v === STATUS.YES);
     if (!hasAny) errs.selections = '少なくとも1つの練習日に「参加」を選択してください';
@@ -102,7 +100,6 @@ export default function RegistrationForm({ sessions }) {
         }
         const result = await registerForSession({
           sessionId: session.id,
-          parentName: parentName.trim(),
           childName: child.name.trim(),
           forceWaitlist: isFull,
         });
@@ -118,7 +115,6 @@ export default function RegistrationForm({ sessions }) {
   }
 
   function reset() {
-    setParentName('');
     setChildren([{ name: '' }]);
     setSelections({});
     setResults(null);
@@ -231,28 +227,13 @@ export default function RegistrationForm({ sessions }) {
   // ── Main form ──────────────────────────────────────────────────────────────
   return (
     <form onSubmit={handleSubmit} className="p-4 space-y-5">
-      {/* Parent info */}
-      <div className="card space-y-4">
-        <h2 className="text-base font-bold text-gray-800">保護者情報</h2>
-        <div className="space-y-1">
-          <label className="text-sm font-medium text-gray-700">
-            保護者名 <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            className="input-field"
-            placeholder="例：山田 太郎"
-            value={parentName}
-            onChange={(e) => setParentName(e.target.value)}
-          />
-          {errors.parentName && <p className="text-red-500 text-xs">{errors.parentName}</p>}
-        </div>
-      </div>
-
       {/* Children */}
       <div className="card space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-gray-800">子供の名前</h2>
+          <div>
+            <h2 className="text-base font-bold text-gray-800">生徒名 <span className="text-red-500">*</span></h2>
+            <p className="text-xs text-gray-500 mt-0.5">漢字フルネームで入力してください</p>
+          </div>
           <button
             type="button"
             onClick={addChild}
@@ -268,7 +249,7 @@ export default function RegistrationForm({ sessions }) {
               <input
                 type="text"
                 className="input-field"
-                placeholder={`子供 ${i + 1} の名前`}
+                placeholder={`例：細江 太郎`}
                 value={ch.name}
                 onChange={(e) => setChildName(i, e.target.value)}
               />
@@ -330,7 +311,7 @@ export default function RegistrationForm({ sessions }) {
                     <div key={ci} className="space-y-1">
                       {children.length > 1 && (
                         <div className="text-xs font-medium text-gray-500">
-                          {ch.name || `子供 ${ci + 1}`}
+                          {ch.name || `生徒 ${ci + 1}`}
                         </div>
                       )}
                       <div className="grid grid-cols-2 gap-2">
