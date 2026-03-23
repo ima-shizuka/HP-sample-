@@ -302,13 +302,13 @@ function AddSessionForm({ onAdd }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
+    <form onSubmit={handleSubmit} className="w-full overflow-hidden space-y-3">
       {/* 日付: 1行フル幅 */}
       <div className="space-y-1">
         <label className="text-xs font-medium text-gray-600">日付</label>
         <input
           type="date"
-          className="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full max-w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           value={date}
           onChange={(e) => setDate(e.target.value)}
           required
@@ -328,12 +328,12 @@ function AddSessionForm({ onAdd }) {
         <span className="text-xs text-gray-500 shrink-0">人</span>
       </div>
       {/* 開始・終了時間: 2列 */}
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-4">
         <div className="min-w-0 space-y-1">
           <label className="text-xs font-medium text-gray-600">開始時間</label>
           <input
             type="time"
-            className="w-full min-w-0 border border-gray-300 rounded-xl px-1 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full max-w-full min-w-0 border border-gray-300 rounded-xl px-1 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={startTime}
             onChange={(e) => setStartTime(e.target.value)}
           />
@@ -342,7 +342,7 @@ function AddSessionForm({ onAdd }) {
           <label className="text-xs font-medium text-gray-600">終了時間</label>
           <input
             type="time"
-            className="w-full min-w-0 border border-gray-300 rounded-xl px-1 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            className="w-full max-w-full min-w-0 border border-gray-300 rounded-xl px-1 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={endTime}
             onChange={(e) => setEndTime(e.target.value)}
           />
@@ -583,7 +583,7 @@ export default function AdminPanel({ onLogout }) {
         )}
 
         {/* Add session */}
-        <div className="card space-y-4">
+        <div className="card space-y-4 overflow-hidden">
           <h3 className="font-semibold text-gray-800 flex items-center gap-2">
             <Calendar className="w-4 h-4 text-blue-500" />
             練習日を追加
