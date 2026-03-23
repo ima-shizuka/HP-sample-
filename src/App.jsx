@@ -31,6 +31,12 @@ export default function App() {
   const isAdmin = params.get('admin') === '1';
 
   useEffect(() => {
+    document.title = isAdmin
+      ? '細江卓研 休日練習 【管理者画面】'
+      : '細江卓研 休日練習予約';
+  }, [isAdmin]);
+
+  useEffect(() => {
     const unsub = subscribeToSessions((data) => {
       setSessions(data);
       setSessionsLoading(false);
