@@ -303,8 +303,8 @@ function AddSessionForm({ onAdd }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
-      <div className="flex gap-2 items-end">
-        <div className="flex-1 space-y-1">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
           <label className="text-xs font-medium text-gray-600">日付</label>
           <input
             type="date"
@@ -314,7 +314,7 @@ function AddSessionForm({ onAdd }) {
             required
           />
         </div>
-        <div className="w-20 space-y-1">
+        <div className="space-y-1">
           <label className="text-xs font-medium text-gray-600">定員</label>
           <input
             type="number"
@@ -326,8 +326,8 @@ function AddSessionForm({ onAdd }) {
           />
         </div>
       </div>
-      <div className="flex gap-2 items-end">
-        <div className="flex-1 space-y-1">
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-1">
           <label className="text-xs font-medium text-gray-600">開始時間</label>
           <input
             type="time"
@@ -336,7 +336,7 @@ function AddSessionForm({ onAdd }) {
             onChange={(e) => setStartTime(e.target.value)}
           />
         </div>
-        <div className="flex-1 space-y-1">
+        <div className="space-y-1">
           <label className="text-xs font-medium text-gray-600">終了時間</label>
           <input
             type="time"
@@ -345,10 +345,10 @@ function AddSessionForm({ onAdd }) {
             onChange={(e) => setEndTime(e.target.value)}
           />
         </div>
-        <button type="submit" disabled={loading || !date} className="btn-primary py-2.5 text-sm w-auto px-5">
-          {loading ? '...' : '追加'}
-        </button>
       </div>
+      <button type="submit" disabled={loading || !date} className="btn-primary py-2.5 text-sm">
+        {loading ? '追加中...' : '追加'}
+      </button>
     </form>
   );
 }
