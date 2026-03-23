@@ -304,21 +304,21 @@ function AddSessionForm({ onAdd }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <label className="text-xs font-medium text-gray-600">日付</label>
           <input
             type="date"
-            className="input-field text-sm py-2"
+            className="w-full min-w-0 border border-gray-300 rounded-xl px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={date}
             onChange={(e) => setDate(e.target.value)}
             required
           />
         </div>
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <label className="text-xs font-medium text-gray-600">定員</label>
           <input
             type="number"
-            className="input-field text-sm py-2"
+            className="w-full min-w-0 border border-gray-300 rounded-xl px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             min="1"
             max="100"
             value={capacity}
@@ -327,20 +327,20 @@ function AddSessionForm({ onAdd }) {
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <label className="text-xs font-medium text-gray-600">開始時間</label>
           <input
             type="time"
-            className="input-field text-sm py-2"
+            className="w-full min-w-0 border border-gray-300 rounded-xl px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={startTime}
             onChange={(e) => setStartTime(e.target.value)}
           />
         </div>
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <label className="text-xs font-medium text-gray-600">終了時間</label>
           <input
             type="time"
-            className="input-field text-sm py-2"
+            className="w-full min-w-0 border border-gray-300 rounded-xl px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             value={endTime}
             onChange={(e) => setEndTime(e.target.value)}
           />
