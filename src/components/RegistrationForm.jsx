@@ -16,10 +16,18 @@ export default function RegistrationForm({ sessions }) {
   const [waitlistModal, setWaitlistModal] = useState(null);
 
   const upcomingSessions = sessions.filter((s) => {
+    if (s.isOpen === false) return false;
     const d = parseISO(s.date);
+    const now = new Date();
+    if (s.startTime) {
+      const [h, m] = s.startTime.split(':').map(Number);
+      const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m);
+      return start > now;
+    }
+    // 開始時間なし → 日付ベース
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    return d >= today && s.isOpen !== false;
+    return d >= today;
   });
 
   function addChild() {
