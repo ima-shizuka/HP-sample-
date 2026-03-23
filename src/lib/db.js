@@ -145,7 +145,7 @@ export async function registerForSession({
     const regRef = doc(registrationsRef());
     tx.set(regRef, {
       sessionId,
-      parentName,
+      parentName: parentName || null,
       childName,
       lineUserId: lineUserId || null,
       email: email || null,
