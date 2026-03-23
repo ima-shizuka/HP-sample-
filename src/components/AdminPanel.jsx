@@ -302,17 +302,19 @@ function AddSessionForm({ onAdd }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="w-full overflow-hidden space-y-3">
+    <form onSubmit={handleSubmit} className="w-full space-y-3">
       {/* 日付: 1行フル幅 */}
       <div className="space-y-1">
         <label className="text-xs font-medium text-gray-600">日付</label>
-        <input
-          type="date"
-          className="w-full max-w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          required
-        />
+        <div className="flex">
+          <input
+            type="date"
+            className="flex-1 min-w-0 border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            required
+          />
+        </div>
       </div>
       {/* 定員: ラベル左・入力右寄せ */}
       <div className="flex items-center gap-2">
@@ -331,21 +333,25 @@ function AddSessionForm({ onAdd }) {
       <div className="grid grid-cols-2 gap-4">
         <div className="min-w-0 space-y-1">
           <label className="text-xs font-medium text-gray-600">開始時間</label>
-          <input
-            type="time"
-            className="w-full max-w-full min-w-0 border border-gray-300 rounded-xl px-1 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={startTime}
-            onChange={(e) => setStartTime(e.target.value)}
-          />
+          <div className="flex">
+            <input
+              type="time"
+              className="flex-1 min-w-0 border border-gray-300 rounded-xl px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+            />
+          </div>
         </div>
         <div className="min-w-0 space-y-1">
           <label className="text-xs font-medium text-gray-600">終了時間</label>
-          <input
-            type="time"
-            className="w-full max-w-full min-w-0 border border-gray-300 rounded-xl px-1 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            value={endTime}
-            onChange={(e) => setEndTime(e.target.value)}
-          />
+          <div className="flex">
+            <input
+              type="time"
+              className="flex-1 min-w-0 border border-gray-300 rounded-xl px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+            />
+          </div>
         </div>
       </div>
       <button type="submit" disabled={loading || !date} className="btn-primary py-2.5 text-sm">
