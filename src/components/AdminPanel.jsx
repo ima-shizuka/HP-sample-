@@ -10,6 +10,7 @@ import {
   deleteSession,
   cancelRegistration,
   adminConfirmUpgrade,
+  adminAddParticipant,
   updateSession,
   subscribeToSessions,
   subscribeToRegistrations,
@@ -123,12 +124,14 @@ function RegistrationRow({ reg, onCancel, onConfirmUpgrade, locked }) {
 }
 
 // ─── Session card ─────────────────────────────────────────────────────────────
-function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggleOpen, locked }) {
+function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggleOpen, onAdminAdd, locked }) {
   const [expanded, setExpanded] = useState(false);
   const [regs, setRegs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [togglingOpen, setTogglingOpen] = useState(false);
+  const [adminAddName, setAdminAddName] = useState('');
+  const [adminAdding, setAdminAdding] = useState(false);
 
   useEffect(() => {
     if (!expanded) return;
@@ -162,6 +165,18 @@ function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggl
     if (!confirm(willOpen ? '募集を再開しますか？' : '募集を停止しますか？\n保護者向けページから非表示になります。')) return;
     setTogglingOpen(true);
     try { await onToggleOpen(session.id, willOpen); } finally { setTogglingOpen(false); }
+  }
+
+  async function handleAdminAdd() {
+    if (!adminAddName.trim()) return;
+    if (!confirm(`管理者枠として「${adminAddName}」を参加確定で追加しますか？`)) return;
+    setAdminAdding(true);
+    try {
+      await onAdminAdd(session.id, adminAddName.trim());
+      setAdminAddName('');
+    } finally {
+      setAdminAdding(false);
+    }
   }
 
   const pendingCount = session.pendingUpgradeCount || 0;
@@ -206,6 +221,14 @@ function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggl
             {session.isOpen === false && (
               <span className="text-xs text-gray-400 font-medium">募集停止中</span>
             )}
+            {session.publishAt && (() => {
+              const pub = session.publishAt.toDate ? session.publishAt.toDate() : new Date(session.publishAt);
+              return pub > new Date() ? (
+                <span className="text-xs text-purple-600 font-medium">
+                  公開予定: {format(pub, 'M/d HH:mm')}
+                </span>
+              ) : null;
+            })()}
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -273,6 +296,28 @@ function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggl
               CSVダウンロード
             </button>
           )}
+
+          {!loading && !locked && (
+            <div className="pt-3 border-t border-gray-100 space-y-2">
+              <div className="text-xs font-semibold text-gray-500">管理者枠追加</div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  className="flex-1 min-w-0 border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="生徒名（漢字フルネーム）"
+                  value={adminAddName}
+                  onChange={(e) => setAdminAddName(e.target.value)}
+                />
+                <button
+                  onClick={handleAdminAdd}
+                  disabled={adminAdding || !adminAddName.trim()}
+                  className="shrink-0 px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-xl disabled:opacity-50"
+                >
+                  {adminAdding ? '...' : '追加'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -285,6 +330,7 @@ function AddSessionForm({ onAdd }) {
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
   const [capacity, setCapacity] = useState(20);
+  const [publishAt, setPublishAt] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e) {
@@ -292,10 +338,11 @@ function AddSessionForm({ onAdd }) {
     if (!date) return;
     setLoading(true);
     try {
-      await onAdd({ date, startTime, endTime, capacity: Number(capacity) });
+      await onAdd({ date, startTime, endTime, capacity: Number(capacity), publishAt });
       setDate('');
       setStartTime('');
       setEndTime('');
+      setPublishAt('');
     } finally {
       setLoading(false);
     }
@@ -354,6 +401,18 @@ function AddSessionForm({ onAdd }) {
           </div>
         </div>
       </div>
+      {/* 公開日時 */}
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-gray-600">公開日時（空欄＝即時公開）</label>
+        <div className="flex">
+          <input
+            type="datetime-local"
+            className="flex-1 min-w-0 border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            value={publishAt}
+            onChange={(e) => setPublishAt(e.target.value)}
+          />
+        </div>
+      </div>
       <button type="submit" disabled={loading || !date} className="btn-primary py-2.5 text-sm">
         {loading ? '追加中...' : '追加'}
       </button>
@@ -370,6 +429,7 @@ function MonthlyBatchForm({ existingDates, onAdd }) {
   const [capacity, setCapacity] = useState(20);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
+  const [publishAt, setPublishAt] = useState('');
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState([]);
 
@@ -403,7 +463,7 @@ function MonthlyBatchForm({ existingDates, onAdd }) {
     setLoading(true);
     try {
       for (const date of toAdd) {
-        await onAdd({ date, startTime, endTime, capacity: Number(capacity) });
+        await onAdd({ date, startTime, endTime, capacity: Number(capacity), publishAt });
       }
     } finally {
       setLoading(false);
@@ -482,6 +542,17 @@ function MonthlyBatchForm({ existingDates, onAdd }) {
           onChange={(e) => setCapacity(e.target.value)}
         />
       </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-gray-600">公開日時（全日共通・空欄＝即時公開）</label>
+        <div className="flex">
+          <input
+            type="datetime-local"
+            className="flex-1 min-w-0 input-field text-sm py-2"
+            value={publishAt}
+            onChange={(e) => setPublishAt(e.target.value)}
+          />
+        </div>
+      </div>
 
       {preview.length > 0 && (
         <div className="bg-gray-50 rounded-xl p-3 space-y-1.5">
@@ -544,6 +615,9 @@ export default function AdminPanel({ onLogout }) {
   }
   async function handleToggleOpen(sessionId, willOpen) {
     await updateSession(sessionId, { isOpen: willOpen });
+  }
+  async function handleAdminAdd(sessionId, childName) {
+    await adminAddParticipant(sessionId, childName);
   }
 
   const upcomingSessions = sessions.filter((s) => !hasStarted(s));
@@ -629,7 +703,7 @@ export default function AdminPanel({ onLogout }) {
             </div>
           )}
           {upcomingSessions.map((s) => (
-            <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} onConfirmUpgrade={handleConfirmUpgrade} onToggleOpen={handleToggleOpen} locked={false} />
+            <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} onConfirmUpgrade={handleConfirmUpgrade} onToggleOpen={handleToggleOpen} onAdminAdd={handleAdminAdd} locked={false} />
           ))}
         </div>
 
@@ -641,7 +715,7 @@ export default function AdminPanel({ onLogout }) {
               過去の練習履歴 ({pastSessions.length}件)
             </h2>
             {pastSessions.slice().reverse().map((s) => (
-              <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} onConfirmUpgrade={handleConfirmUpgrade} onToggleOpen={handleToggleOpen} locked={true} />
+              <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} onConfirmUpgrade={handleConfirmUpgrade} onToggleOpen={handleToggleOpen} onAdminAdd={handleAdminAdd} locked={true} />
             ))}
           </div>
         )}

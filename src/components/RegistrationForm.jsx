@@ -17,6 +17,11 @@ export default function RegistrationForm({ sessions }) {
 
   const upcomingSessions = sessions.filter((s) => {
     if (s.isOpen === false) return false;
+    // Not yet published
+    if (s.publishAt) {
+      const pub = s.publishAt.toDate ? s.publishAt.toDate() : new Date(s.publishAt);
+      if (pub > new Date()) return false;
+    }
     const d = parseISO(s.date);
     const now = new Date();
     if (s.startTime) {

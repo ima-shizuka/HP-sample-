@@ -64,7 +64,7 @@ export async function getSession(id) {
   return snap.exists() ? { id: snap.id, ...snap.data() } : null;
 }
 
-export async function createSession({ date, startTime, endTime, capacity }) {
+export async function createSession({ date, startTime, endTime, capacity, publishAt }) {
   return addDoc(sessionsRef(), {
     date,
     startTime: startTime || null,
@@ -74,6 +74,7 @@ export async function createSession({ date, startTime, endTime, capacity }) {
     waitlistCount: 0,
     pendingUpgradeCount: 0,
     isOpen: true,
+    publishAt: publishAt ? Timestamp.fromDate(new Date(publishAt)) : null,
     createdAt: serverTimestamp(),
   });
 }
@@ -314,4 +315,34 @@ export async function setAdminPin(pin) {
 
 export function getAdminPin() {
   return localStorage.getItem('admin_pin') || import.meta.env.VITE_ADMIN_PIN || '1234';
+}
+
+/**
+ * Admin directly adds a participant as confirmed, consuming one capacity slot.
+ */
+export async function adminAddParticipant(sessionId, childName) {
+  return runTransaction(db, async (tx) => {
+    const sRef = sessionRef(sessionId);
+    const sessionSnap = await tx.get(sRef);
+    if (!sessionSnap.exists()) throw new Error('セッションが存在しません');
+
+    const regRef = doc(registrationsRef());
+    tx.set(regRef, {
+      sessionId,
+      parentName: null,
+      childName,
+      lineUserId: null,
+      email: null,
+      status: 'confirmed',
+      waitlistPosition: null,
+      notificationToken: crypto.randomUUID(),
+      isAdminAdded: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    tx.update(sRef, { confirmedCount: increment(1) });
+
+    return { registrationId: regRef.id };
+  });
 }
