@@ -320,6 +320,18 @@ export function getAdminPin() {
 /**
  * Admin directly adds a participant as confirmed, consuming one capacity slot.
  */
+export async function getRegistrationsByChildName(childName) {
+  const q = query(
+    registrationsRef(),
+    where('childName', '==', childName),
+    orderBy('createdAt', 'asc')
+  );
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((r) => r.status !== 'cancelled');
+}
+
 export async function adminAddParticipant(sessionId, childName) {
   return runTransaction(db, async (tx) => {
     const sRef = sessionRef(sessionId);
