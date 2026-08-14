@@ -2,6 +2,9 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+> 学童の給与予測自動計算（①シフト表 → ③給与明細シート → ②全社集計）は、
+> 別サブプロジェクトの [`salary_prediction/`](salary_prediction/README.md)（Python）にあります。
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)

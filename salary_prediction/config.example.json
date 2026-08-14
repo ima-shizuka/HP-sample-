@@ -1,0 +1,12 @@
+{
+  "shift": "input/①シフト表.xlsx",
+  "kintai_dir": "input/kintai",
+  "summary": "input/②全社集計.xlsm",
+  "area": "磐田",
+  "from_day": 24,
+  "to_day": 31,
+  "out_dir": "out",
+  "gakudo_names": {
+    "__豊岡北小_給与明細シート": "豊岡北小"
+  }
+}

@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+# 実データ（給与情報）と出力はコミットしない
+input/
+out/
+config.json
+~$*
