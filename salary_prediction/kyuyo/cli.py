@@ -142,7 +142,8 @@ def cmd_plan(args) -> int:
     csv_path = report.write_csv(plans, os.path.join(out_dir, "plan.csv"))
     _echo(report.render_markdown(plans))
     _echo(f"\n→ レポート: {md} / {csv_path}")
-    _echo("内容を確認したら `apply --yes` で③に書き込みます。")
+    if not getattr(args, "no_hint", False):
+        _echo("内容を確認したら `apply --yes` で③に書き込みます。")
     return 0
 
 
@@ -210,6 +211,12 @@ def cmd_summary(args) -> int:
     return 0
 
 
+def cmd_wizard(args) -> int:
+    from .wizard import run  # 循環importを避けるためここで読み込む
+
+    return run(args.input_dir or "input", args.out_dir or DEFAULT_OUT)
+
+
 # ------------------------------------------------------------------ パーサ
 
 def build_parser() -> argparse.ArgumentParser:
@@ -235,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_plan = sub.add_parser("plan", help="①を読み、③への書き込み計画をレポート出力する（書き込まない）")
     add_plan_args(p_plan)
+    p_plan.add_argument("--no-hint", action="store_true", help=argparse.SUPPRESS)
     p_plan.set_defaults(func=cmd_plan)
 
     p_apply = sub.add_parser("apply", help="計画どおり③に書き込む（--yes が必要）")
@@ -253,6 +261,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_sum.add_argument("--out-dir", help=f"出力先フォルダ（既定: {DEFAULT_OUT}）")
     p_sum.add_argument("--write", action="store_true", help="実際に②へ書き込む")
     p_sum.set_defaults(func=cmd_summary)
+
+    p_wiz = sub.add_parser("wizard", help="対話モード（「開始」から呼ばれる。input フォルダを自動で読む）")
+    p_wiz.add_argument("--input-dir", help="①②③を置いたフォルダ（既定: input）")
+    p_wiz.add_argument("--out-dir", help=f"出力先フォルダ（既定: {DEFAULT_OUT}）")
+    p_wiz.set_defaults(func=cmd_wizard)
     return parser
 
 

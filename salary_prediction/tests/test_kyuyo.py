@@ -10,12 +10,13 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 import openpyxl
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kyuyo import cli, textutil as tu  # noqa: E402
+from kyuyo import cli, textutil as tu, wizard  # noqa: E402
 from kyuyo.kintai_index import KintaiIndex  # noqa: E402
 from kyuyo.kintai_write import apply_plans  # noqa: E402
 from kyuyo.plan import build_plans, compute_break_minutes  # noqa: E402
@@ -325,6 +326,92 @@ class TestCliErrors(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             cli.main(["plan", "--shift", broken, "--kintai-dir", self.tmp.name])
         self.assertIn("開けません", str(ctx.exception))
+
+
+class TestWizard(unittest.TestCase):
+    """「開始」から呼ばれる対話モード。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.base = os.path.join(self.tmp.name, "input")
+
+    def test_reports_missing_files(self):
+        wizard.ensure_folders(self.base)
+        found = wizard.find_inputs(self.base)
+        self.assertIsNone(found["shift"])
+        self.assertTrue(any("①シフト表がありません" in p for p in found["problems"]))
+        self.assertTrue(any("③がありません" in p for p in found["problems"]))
+
+    def test_finds_files_by_name(self):
+        wizard.ensure_folders(self.base)
+        fixtures.make_shift_book(os.path.join(self.base, "shift.xlsx"))
+        fixtures.make_kintai_book(os.path.join(self.base, "kintai", "__向笠_給与明細シート.xlsx"),
+                                  persons=["鈴木花子"])
+        fixtures.make_summary_book(os.path.join(self.base, "summary.xlsm"), ["向笠"])
+        found = wizard.find_inputs(self.base)
+        self.assertEqual(found["problems"], [])
+        self.assertTrue(found["shift"].endswith("shift.xlsx"))
+        self.assertTrue(found["summary"].endswith("summary.xlsm"))
+        self.assertEqual(len(found["kintai_files"]), 1)
+
+    def test_ambiguous_shift_file(self):
+        wizard.ensure_folders(self.base)
+        fixtures.make_shift_book(os.path.join(self.base, "①.xlsx"))
+        fixtures.make_shift_book(os.path.join(self.base, "①(修正).xlsx"))
+        fixtures.make_kintai_book(os.path.join(self.base, "kintai", "__向笠_給与明細シート.xlsx"),
+                                  persons=["鈴木花子"])
+        found = wizard.find_inputs(self.base)
+        self.assertIsNone(found["shift"])
+        self.assertTrue(any("特定できません" in p for p in found["problems"]))
+
+    def test_single_unnamed_shift_file_is_used(self):
+        wizard.ensure_folders(self.base)
+        fixtures.make_shift_book(os.path.join(self.base, "8月シフト.xlsx"))
+        fixtures.make_kintai_book(os.path.join(self.base, "kintai", "__向笠_給与明細シート.xlsx"),
+                                  persons=["鈴木花子"])
+        found = wizard.find_inputs(self.base)
+        self.assertTrue(found["shift"].endswith("8月シフト.xlsx"))
+
+    def test_full_run_writes_files(self):
+        """「開始」→ Enter を押していく流れを、入力を差し替えて再現する。"""
+        wizard.ensure_folders(self.base)
+        paths = fixtures.build_all(self.tmp.name)
+        os.replace(paths["shift"], os.path.join(self.base, "shift.xlsx"))
+        for name in os.listdir(paths["kintai_dir"]):
+            os.replace(os.path.join(paths["kintai_dir"], name),
+                       os.path.join(self.base, "kintai", name))
+        os.replace(paths["summary"], os.path.join(self.base, "summary.xlsm"))
+
+        answers = iter(["1", "y", "y", "磐田"])  # 中締め翌日 / 書き込む / 保存した / ②のシート名
+        out_dir = os.path.join(self.tmp.name, "out")
+        with unittest.mock.patch.object(wizard, "ask", lambda *a, **k: next(answers)), \
+             unittest.mock.patch.object(wizard, "open_in_explorer", lambda path: None):
+            code = wizard.run(self.base, out_dir)
+
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "plan.csv")))
+        self.assertTrue(os.path.isfile(os.path.join(out_dir, "kintai", "__向笠_給与明細シート.xlsx")))
+        wb = openpyxl.load_workbook(os.path.join(out_dir, "kintai", "__向笠_給与明細シート.xlsx"))
+        self.assertEqual(wb["◎田中太郎"].cell(row=15, column=3).value, T(8, 0))
+        wb.close()
+
+    def test_stops_when_user_declines(self):
+        wizard.ensure_folders(self.base)
+        paths = fixtures.build_all(self.tmp.name)
+        os.replace(paths["shift"], os.path.join(self.base, "shift.xlsx"))
+        for name in os.listdir(paths["kintai_dir"]):
+            os.replace(os.path.join(paths["kintai_dir"], name),
+                       os.path.join(self.base, "kintai", name))
+
+        answers = iter(["1", "n"])
+        out_dir = os.path.join(self.tmp.name, "out_declined")
+        with unittest.mock.patch.object(wizard, "ask", lambda *a, **k: next(answers)), \
+             unittest.mock.patch.object(wizard, "open_in_explorer", lambda path: None):
+            code = wizard.run(self.base, out_dir)
+
+        self.assertEqual(code, 0)
+        self.assertFalse(os.path.exists(os.path.join(out_dir, "kintai")))
 
 
 if __name__ == "__main__":
