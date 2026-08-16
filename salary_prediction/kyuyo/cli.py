@@ -17,6 +17,9 @@ import json
 import os
 import re
 import sys
+from zipfile import BadZipFile
+
+from openpyxl.utils.exceptions import InvalidFileException
 
 from . import report
 from .kintai_index import KintaiIndex
@@ -37,14 +40,45 @@ def load_config(path: str | None) -> dict:
         return json.load(f)
 
 
+def require_file(path: str, label: str) -> str:
+    """ファイルが無ければ、原因の分かるメッセージで止める。"""
+    if os.path.isfile(path):
+        return path
+    if os.path.isdir(path):
+        raise SystemExit(f"{label}にフォルダが指定されています: {path}")
+    hint = ""
+    parent = os.path.dirname(os.path.abspath(path))
+    if os.path.isdir(parent):
+        found = sorted(
+            f for f in os.listdir(parent)
+            if f.lower().endswith((".xlsx", ".xlsm")) and not f.startswith("~$")
+        )
+        if found:
+            hint = "\n  同じフォルダにあるExcel: " + " / ".join(found)
+    raise SystemExit(
+        f"{label}が見つかりません: {path}\n"
+        f"  今いるフォルダ: {os.getcwd()}\n"
+        f"  ファイルを置いたか、名前の綴り（拡張子・全角文字）を確認してください。{hint}"
+    )
+
+
 def kintai_paths(directory: str) -> list[str]:
+    if not os.path.isdir(directory):
+        raise SystemExit(
+            f"③のフォルダが見つかりません: {directory}\n"
+            f"  今いるフォルダ: {os.getcwd()}\n"
+            "  `mkdir input\\kintai` で作り、③のファイルをすべてその中に入れてください。"
+        )
     paths = [
         p for p in sorted(glob.glob(os.path.join(directory, "*.xlsx")) +
                           glob.glob(os.path.join(directory, "*.xlsm")))
         if not os.path.basename(p).startswith("~$")
     ]
     if not paths:
-        raise SystemExit(f"③ファイルが見つかりません: {directory}")
+        raise SystemExit(
+            f"③ファイル(.xlsx/.xlsm)が1つもありません: {directory}\n"
+            "  各学童の給与明細シートをこのフォルダに入れてください。"
+        )
     return paths
 
 
@@ -78,7 +112,15 @@ def cmd_index(args) -> int:
 
 
 def _make_plans(args):
-    book = ShiftBook(args.shift)
+    require_file(args.shift, "①シフト表")
+    try:
+        book = ShiftBook(args.shift)
+    except (BadZipFile, InvalidFileException) as exc:
+        raise SystemExit(
+            f"①シフト表を開けません: {args.shift}\n"
+            f"  {exc}\n"
+            "  古い形式(.xls)の場合は、Excelで開いて .xlsx として保存し直してください。"
+        ) from exc
     sheets = args.sheets or book.sheet_names
     missing = [s for s in sheets if s not in book.sheet_names]
     if missing:
@@ -152,6 +194,7 @@ def cmd_summary(args) -> int:
         _echo("\n※ --summary で②のファイルを指定すると転記できます。")
         return 0
 
+    require_file(args.summary, "②全社集計")
     out_path = args.out or os.path.join(args.out_dir or DEFAULT_OUT, os.path.basename(args.summary))
     results = write_to_summary(
         args.summary, args.area, totals,

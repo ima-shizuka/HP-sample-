@@ -15,7 +15,7 @@ import openpyxl
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kyuyo import textutil as tu  # noqa: E402
+from kyuyo import cli, textutil as tu  # noqa: E402
 from kyuyo.kintai_index import KintaiIndex  # noqa: E402
 from kyuyo.kintai_write import apply_plans  # noqa: E402
 from kyuyo.plan import build_plans, compute_break_minutes  # noqa: E402
@@ -288,6 +288,43 @@ class TestTotals(PipelineTestCase):
         wb = openpyxl.load_workbook(self.paths["summary"])
         self.assertIsNone(wb["磐田"].cell(row=73, column=5).value)
         wb.close()
+
+
+class TestCliErrors(unittest.TestCase):
+    """ファイルの置き忘れ等で、長いトレースバックではなく説明を出すこと。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_missing_shift_file(self):
+        with self.assertRaises(SystemExit) as ctx:
+            cli.main(["plan", "--shift", os.path.join(self.tmp.name, "shift.xlsx"),
+                      "--kintai-dir", self.tmp.name])
+        self.assertIn("①シフト表が見つかりません", str(ctx.exception))
+
+    def test_missing_kintai_dir(self):
+        shift = fixtures.make_shift_book(os.path.join(self.tmp.name, "shift.xlsx"))
+        with self.assertRaises(SystemExit) as ctx:
+            cli.main(["plan", "--shift", shift,
+                      "--kintai-dir", os.path.join(self.tmp.name, "kintai")])
+        self.assertIn("③のフォルダが見つかりません", str(ctx.exception))
+
+    def test_empty_kintai_dir(self):
+        shift = fixtures.make_shift_book(os.path.join(self.tmp.name, "shift.xlsx"))
+        empty = os.path.join(self.tmp.name, "kintai")
+        os.makedirs(empty)
+        with self.assertRaises(SystemExit) as ctx:
+            cli.main(["plan", "--shift", shift, "--kintai-dir", empty])
+        self.assertIn("③ファイル", str(ctx.exception))
+
+    def test_not_an_xlsx(self):
+        broken = os.path.join(self.tmp.name, "shift.xlsx")
+        with open(broken, "w", encoding="utf-8") as f:
+            f.write("これはExcelではない")
+        with self.assertRaises(SystemExit) as ctx:
+            cli.main(["plan", "--shift", broken, "--kintai-dir", self.tmp.name])
+        self.assertIn("開けません", str(ctx.exception))
 
 
 if __name__ == "__main__":
