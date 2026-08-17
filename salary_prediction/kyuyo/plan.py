@@ -83,7 +83,7 @@ def build_plans(
     """
     plans: list[WritePlan] = []
     for (person, day), entry in sorted(merged.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-        ref, reason = index.resolve(person)
+        ref, reason = index.resolve(person, entry.file_hint)
         row = FIRST_DAY_ROW + day - 1 if ref else None
 
         plan = WritePlan(
@@ -126,7 +126,8 @@ def build_plans(
         if entry.kind == "time" and entry.shifts:
             plan.start = min(s for s, _ in entry.shifts)
             plan.end = max(e for _, e in entry.shifts)
-            plan.break_minutes = compute_break_minutes(entry.shifts)
+            plan.break_minutes = (entry.break_minutes if entry.break_minutes is not None
+                                  else compute_break_minutes(entry.shifts))
             plan.status = "review" if entry.warnings else "write"
             plan.reason = "勤務時間を転記" if plan.status == "write" else "要確認（警告あり）"
         elif entry.kind == "absence" and entry.absence:

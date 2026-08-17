@@ -93,14 +93,19 @@ class KintaiIndex:
 
     # ------------------------------------------------------------ 照合
 
-    def resolve(self, person: str) -> tuple[SheetRef | None, str]:
+    def resolve(self, person: str, file_hint: str | None = None) -> tuple[SheetRef | None, str]:
         """氏名から書き込み先シートを1つに決める。
 
+        file_hint（③のファイル名の一部）を渡すと、そのファイルの中だけで探す。
+        同名の先生が複数ファイルにいる場合に、固定シフト設定から指定するために使う。
         戻り値は (シート参照, 理由)。決まらない場合は (None, 理由)。
         """
         key = tu.normalize_person(person)
         if not key:
             return None, "氏名が空"
+
+        if file_hint:
+            return self._resolve_in_file(key, file_hint)
 
         exact = self.by_person.get(key, [])
         if len(exact) == 1:
@@ -120,6 +125,26 @@ class KintaiIndex:
             places = " / ".join(str(r) for r in partial)
             return None, f"部分一致の候補が複数: {places}"
         return None, "③に該当シートなし"
+
+    def _resolve_in_file(self, key: str, file_hint: str) -> tuple[SheetRef | None, str]:
+        """③ファイル名に file_hint を含むファイルの中だけで氏名を探す。"""
+        hint = tu.normalize(file_hint)
+        in_file = [r for r in self.refs if not r.red_tab and hint in tu.normalize(r.filename)]
+        if not in_file:
+            return None, f"「{file_hint}」を含む③ファイルが見つからない"
+
+        exact = [r for r in in_file if r.person == key]
+        if len(exact) == 1:
+            return exact[0], f"氏名完全一致（{file_hint} 指定）"
+        if len(exact) > 1:
+            return None, "同名シートが複数: " + " / ".join(str(r) for r in exact)
+
+        partial = [r for r in in_file if key in r.person or r.person in key]
+        if len(partial) == 1:
+            return partial[0], f"部分一致（{file_hint} 内の「{partial[0].sheet}」）"
+        if len(partial) > 1:
+            return None, "部分一致の候補が複数: " + " / ".join(str(r) for r in partial)
+        return None, f"「{file_hint}」の中に該当シートなし"
 
     # ------------------------------------------------------------ 点検用
 

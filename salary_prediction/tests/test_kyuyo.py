@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import sys
 import tempfile
@@ -16,11 +17,11 @@ import openpyxl
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from kyuyo import cli, textutil as tu, wizard  # noqa: E402
+from kyuyo import cli, fixed, jp_holidays, textutil as tu, wizard  # noqa: E402
 from kyuyo.kintai_index import KintaiIndex  # noqa: E402
 from kyuyo.kintai_write import apply_plans  # noqa: E402
 from kyuyo.plan import build_plans, compute_break_minutes  # noqa: E402
-from kyuyo.shift import ShiftBook, merge_entries  # noqa: E402
+from kyuyo.shift import DayEntry, ShiftBook, merge_entries  # noqa: E402
 from kyuyo.totals import compute_gakudo_totals, write_to_summary  # noqa: E402
 from tests import fixtures  # noqa: E402
 
@@ -326,6 +327,137 @@ class TestCliErrors(unittest.TestCase):
         with self.assertRaises(SystemExit) as ctx:
             cli.main(["plan", "--shift", broken, "--kintai-dir", self.tmp.name])
         self.assertIn("開けません", str(ctx.exception))
+
+
+class TestJapaneseHolidays(unittest.TestCase):
+    def test_2026_holidays(self):
+        h = jp_holidays.holidays(2026)
+        self.assertEqual(h[datetime.date(2026, 1, 1)], "元日")
+        self.assertEqual(h[datetime.date(2026, 1, 12)], "成人の日")       # 1月第2月曜
+        self.assertEqual(h[datetime.date(2026, 3, 20)], "春分の日")
+        self.assertEqual(h[datetime.date(2026, 8, 11)], "山の日")
+        self.assertEqual(h[datetime.date(2026, 9, 21)], "敬老の日")
+        self.assertEqual(h[datetime.date(2026, 9, 23)], "秋分の日")
+
+    def test_substitute_holiday(self):
+        # 2026-05-03(憲法記念日)が日曜 → 5/6が振替休日（5/4,5/5は祝日のため）
+        self.assertEqual(jp_holidays.holiday_name(datetime.date(2026, 5, 6)), "振替休日")
+
+    def test_citizens_holiday(self):
+        # 敬老の日(9/21)と秋分の日(9/23)に挟まれた9/22
+        self.assertEqual(jp_holidays.holiday_name(datetime.date(2026, 9, 22)), "国民の休日")
+
+    def test_plain_weekday_is_not_holiday(self):
+        self.assertFalse(jp_holidays.is_holiday(datetime.date(2026, 8, 17)))
+
+
+class TestFixedShifts(unittest.TestCase):
+    """①に出てこない/毎月同じ勤務の先生の設定。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def _config(self, data: dict) -> str:
+        path = os.path.join(self.tmp.name, "fixed_shifts.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        return path
+
+    def test_parse_weekdays(self):
+        self.assertEqual(fixed.parse_weekdays("平日"), {0, 1, 2, 3, 4})
+        self.assertEqual(fixed.parse_weekdays("土"), {5})
+        self.assertEqual(fixed.parse_weekdays("土日"), {5, 6})
+        self.assertEqual(fixed.parse_weekdays("月-金"), {0, 1, 2, 3, 4})
+        self.assertEqual(fixed.parse_weekdays(["月", "水"]), {0, 2})
+        self.assertEqual(fixed.parse_weekdays("月曜日"), {0})
+        with self.assertRaises(fixed.FixedShiftConfigError):
+            fixed.parse_weekdays("なんとなく")
+
+    def test_weekday_rule_skips_weekends_and_holidays(self):
+        path = self._config({"rules": [{
+            "person": "山田花子", "file": "【統括】", "weekdays": "平日",
+            "time": "9:30-18:30", "break_minutes": 60,
+        }]})
+        entries = fixed.expand(fixed.load_config(path), 2026, 8)
+        days = sorted(e.day for e in entries)
+        self.assertIn(17, days)          # 月曜
+        self.assertNotIn(15, days)       # 土曜
+        self.assertNotIn(16, days)       # 日曜
+        self.assertNotIn(11, days)       # 山の日
+        self.assertEqual(entries[0].shifts, [(T(9, 30), T(18, 30))])
+        self.assertEqual(entries[0].break_minutes, 60)
+        self.assertEqual(entries[0].file_hint, "【統括】")
+
+    def test_saturday_only_rule(self):
+        path = self._config({"rules": [{
+            "person": "佐藤一郎", "weekdays": "土", "time": "13:00-18:00",
+        }]})
+        entries = fixed.expand(fixed.load_config(path), 2026, 8)
+        saturdays = [d for d in range(1, 32) if datetime.date(2026, 8, d).weekday() == 5]
+        self.assertEqual(sorted(e.day for e in entries), saturdays)
+        self.assertEqual(entries[0].shifts, [(T(13, 0), T(18, 0))])
+        self.assertIsNone(entries[0].break_minutes)  # 5時間なので通常ルール（休憩なし）
+
+    def test_extra_holidays(self):
+        path = self._config({
+            "extra_holidays": ["2026-08-13", "2026-08-14"],
+            "rules": [{"person": "山田花子", "weekdays": "平日", "time": "9:30-18:30"}],
+        })
+        days = [e.day for e in fixed.expand(fixed.load_config(path), 2026, 8)]
+        self.assertNotIn(13, days)
+        self.assertNotIn(14, days)
+        self.assertIn(17, days)
+
+    def test_shift_sheet_takes_priority(self):
+        merged = {("山田花子", 3): DayEntry(day=3, person="山田花子", kind="time",
+                                          shifts=[(T(8, 0), T(12, 0))])}
+        path = self._config({"rules": [{
+            "person": "山田花子", "weekdays": "平日", "time": "9:30-18:30"}]})
+        added = fixed.merge_into(merged, fixed.expand(fixed.load_config(path), 2026, 8))
+        self.assertEqual(merged[("山田花子", 3)].shifts, [(T(8, 0), T(12, 0))])
+        self.assertTrue(any("①の記載を優先" in n for n in merged[("山田花子", 3)].notes))
+        self.assertGreater(added, 0)
+
+    def test_broken_config_is_reported(self):
+        path = self._config({"rules": [{"person": "山田花子", "weekdays": "平日"}]})
+        with self.assertRaises(fixed.FixedShiftConfigError):
+            fixed.load_config(path)
+
+    def test_example_config_is_valid(self):
+        example = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "fixed_shifts.example.json")
+        config = fixed.load_config(example)
+        self.assertTrue(config.rules)
+
+    def test_written_into_kintai_with_file_hint(self):
+        """固定シフトが、指定した③ファイルの本人シートに書き込まれること。"""
+        paths = fixtures.build_all(self.tmp.name)
+        toukatsu = os.path.join(paths["kintai_dir"], "■【統括】給与明細シート.xlsx")
+        fixtures.make_kintai_book(toukatsu, persons=["山田花子"])
+
+        path = self._config({"rules": [{
+            "person": "山田花子", "file": "【統括】", "weekdays": "平日",
+            "time": "9:30-18:30", "break_minutes": 60,
+        }]})
+        out_dir = os.path.join(self.tmp.name, "out_fixed")
+        code = cli.main(["plan", "--shift", paths["shift"], "--kintai-dir", paths["kintai_dir"],
+                         "--fixed", path, "--out-dir", out_dir])
+        self.assertEqual(code, 0)
+
+        code = cli.main(["apply", "--shift", paths["shift"], "--kintai-dir", paths["kintai_dir"],
+                         "--fixed", path, "--out-dir", out_dir, "--yes"])
+        self.assertEqual(code, 0)
+
+        wb = openpyxl.load_workbook(os.path.join(out_dir, "kintai", os.path.basename(toukatsu)))
+        ws = wb["山田花子"]
+        # ①は2026年8月。8/3(月)は13+3-1=15行目
+        self.assertEqual(ws.cell(row=15, column=3).value, T(9, 30))
+        self.assertEqual(ws.cell(row=15, column=5).value, T(18, 30))
+        self.assertEqual(ws.cell(row=15, column=11).value, 60)
+        # 8/11(山の日)は書き込まれない
+        self.assertIsNone(ws.cell(row=23, column=3).value)
+        wb.close()
 
 
 class TestWizard(unittest.TestCase):

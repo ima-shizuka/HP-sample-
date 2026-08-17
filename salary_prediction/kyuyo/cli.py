@@ -21,7 +21,7 @@ from zipfile import BadZipFile
 
 from openpyxl.utils.exceptions import InvalidFileException
 
-from . import report
+from . import fixed, report
 from .kintai_index import KintaiIndex
 from .kintai_write import apply_plans
 from .plan import build_plans
@@ -111,6 +111,46 @@ def cmd_index(args) -> int:
     return 1 if index.duplicates() else 0
 
 
+def default_fixed_path() -> str | None:
+    """fixed_shifts.json を、実行フォルダ → パッケージの親フォルダ の順に探す。"""
+    candidates = [
+        fixed.DEFAULT_FILENAME,
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     fixed.DEFAULT_FILENAME),
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _add_fixed_shifts(args, book, merged) -> None:
+    """固定シフト（①に出てこない先生）の勤務を merged に足す。"""
+    path = getattr(args, "fixed", None) or default_fixed_path()
+    if not path:
+        return
+    try:
+        config = fixed.load_config(path)
+    except fixed.FixedShiftConfigError as exc:
+        raise SystemExit(f"{os.path.basename(path)} の設定に誤りがあります:\n  {exc}") from exc
+    if not config:
+        return
+
+    period = (getattr(args, "year", None), getattr(args, "month", None))
+    if not all(period):
+        period = book.period(args.sheets or None)
+    if not period:
+        raise SystemExit(
+            "固定シフトを展開する年月が分かりません（①のA列に日付が入っていないため）。\n"
+            "  --year 2026 --month 8 のように指定してください。"
+        )
+
+    year, month = period
+    added = fixed.merge_into(merged, fixed.expand(config, year, month))
+    names = "、".join(sorted({rule.person for rule in config.rules}))
+    _echo(f"固定シフト設定（{os.path.basename(path)}）: {year}年{month}月 / {names} → {added}日分を追加")
+
+
 def _make_plans(args):
     require_file(args.shift, "①シフト表")
     try:
@@ -129,6 +169,7 @@ def _make_plans(args):
     entries = book.parse_all(sheets)
     book.resolve_transfers(entries)
     merged = merge_entries(entries)
+    _add_fixed_shifts(args, book, merged)
 
     index = KintaiIndex.build(kintai_paths(args.kintai_dir))
     plans = build_plans(merged, index, from_day=args.from_day or 1, to_day=args.to_day or 31)
@@ -239,6 +280,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--from-day", type=int, help="この日から埋める（中締めの翌日、既定1日）")
         p.add_argument("--to-day", type=int, help="この日まで埋める（既定31日）")
         p.add_argument("--out-dir", help=f"出力先フォルダ（既定: {DEFAULT_OUT}）")
+        p.add_argument("--fixed", help=f"固定シフト設定（既定: {fixed.DEFAULT_FILENAME} があれば自動で使う）")
+        p.add_argument("--year", type=int, help="対象年（①に日付が無いときのみ必要）")
+        p.add_argument("--month", type=int, help="対象月（①に日付が無いときのみ必要）")
 
     p_plan = sub.add_parser("plan", help="①を読み、③への書き込み計画をレポート出力する（書き込まない）")
     add_plan_args(p_plan)

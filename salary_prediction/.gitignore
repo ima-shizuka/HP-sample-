@@ -4,4 +4,5 @@ __pycache__/
 input/
 out/
 config.json
+fixed_shifts.json
 ~$*

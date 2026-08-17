@@ -142,6 +142,8 @@ def run(base_dir: str = DEFAULT_INPUT, out_dir: str = DEFAULT_OUT) -> int:
     _echo(f"  ① シフト表 : {os.path.basename(found['shift'])}")
     _echo(f"  ③ 給与明細 : {len(found['kintai_files'])}ファイル")
     _echo(f"  ② 全社集計 : {os.path.basename(found['summary']) if found['summary'] else '（未配置。③までで止まります）'}")
+    fixed_path = cli.default_fixed_path()
+    _echo(f"  固定シフト : {os.path.basename(fixed_path) if fixed_path else '（無し。fixed_shifts.json を置くと①に出てこない先生も埋められます）'}")
     _echo()
 
     from_day = ask("中締めの翌日（この日から埋めます）", "1")

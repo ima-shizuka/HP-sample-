@@ -42,6 +42,8 @@ class DayEntry:
     shifts: list[tuple[datetime.time, datetime.time]] = field(default_factory=list)
     absence: str | None = None
     destination: str | None = None
+    break_minutes: int | None = None    # 固定シフト等で休憩が決まっている場合
+    file_hint: str | None = None        # 書き込み先の③ファイル名（部分一致）
     sources: list[str] = field(default_factory=list)   # 読み取り元（レポート用）
     raws: list[str] = field(default_factory=list)      # 元のセル文字列
     notes: list[str] = field(default_factory=list)     # 解釈の根拠
@@ -98,6 +100,20 @@ class ShiftBook:
             rows.setdefault(day, row)
             row += 1
         return rows
+
+    def period(self, sheet_names: list[str] | None = None) -> tuple[int, int] | None:
+        """①のA列の日付から (年, 月) を推定する。日付が入っていなければ None。"""
+        counts: dict[tuple[int, int], int] = {}
+        for sheet_name in (sheet_names or self.sheet_names):
+            ws = self._wb[sheet_name]
+            for row in range(self.first_day_row, min(ws.max_row, self.first_day_row + 40) + 1):
+                v = ws.cell(row=row, column=DAY_COL).value
+                if isinstance(v, (datetime.datetime, datetime.date)):
+                    key = (v.year, v.month)
+                    counts[key] = counts.get(key, 0) + 1
+        if not counts:
+            return None
+        return max(counts.items(), key=lambda kv: kv[1])[0]
 
     def headers(self, sheet_name: str) -> dict[int, str | None]:
         """{列番号: 見出しの氏名}。空欄・「非常勤」等は None（＝セル内の名前を使う列）。"""
