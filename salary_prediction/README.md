@@ -35,6 +35,31 @@
 `n` と答えればその場で終了し、③②は書き換わりません。原本は常にそのままで、
 結果は `out` フォルダに作られます。
 
+### 完全自動化（プロンプトなし）
+
+毎月同じ設定で実行する場合、対話プロンプトをすべて飛ばすことができます：
+
+1. **`config.example.json` を `config.json` にコピー**
+   ```bash
+   cp config.example.json config.json
+   ```
+
+2. **`config.json` を編集**
+   ```json
+   {
+     "from_day": 13,        // 中締めの翌日（例：12日中締めなら 13）
+     "area": "磐田",        // ②のシート名（磐田 / 浜松）
+     ...（他の設定）
+   }
+   ```
+
+3. **`開始.bat` をダブルクリック**
+   - `config.json` が自動で読み込まれ、プロンプトなしに実行される
+   - ③をExcelで開いて保存する確認も表示されない（前回保存済みの場合は即座に②へ転記）
+
+> **注意：** 毎月、`config.json` の `from_day` を更新してから`開始.bat` を実行してください。
+> 更新忘れすると前月の日付で埋まります。
+
 ## セットアップ（コマンドで使う場合）
 
 ```bash
@@ -63,6 +88,9 @@ python -m kyuyo summary --kintai-dir out/kintai --summary "input/②.xlsm" --are
 
 毎回同じ引数を打たなくて済むように、`config.example.json` をコピーして
 `--config config.json` で渡せます（CLIで指定した値が優先）。
+
+> **重要：** `開始.bat` を使う場合は、`config.json` が自動で読み込まれます。
+> wizard モードでプロンプトを完全に飛ばしたい場合は、`config.json` に `from_day` と `area` を設定してください。
 
 ### 主なオプション
 
