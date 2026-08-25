@@ -29,10 +29,11 @@ def recalculate_kintai_files(kintai_dir: str, auto_save: bool = True) -> bool:
     pywin32 が使えなければ手動保存を促す。
     Returns: True = 自動実行成功, False = 手動実行が必要
     """
+    # pywin32 が利用可能かチェック
     try:
         import win32com.client  # noqa: F401
     except ImportError:
-        # pywin32 がインストールされていない
+        _echo("⚠ pywin32 がインストールされていません。手動で③を保存してください。")
         return False
 
     try:
@@ -42,18 +43,28 @@ def recalculate_kintai_files(kintai_dir: str, auto_save: bool = True) -> bool:
                       glob.glob(os.path.join(kintai_dir, "*.xlsm")))
 
         if not files:
+            _echo("✓ ③ファイルがないので、再計算スキップ")
             return True  # ファイルがなければ何もしない
 
-        excel = win32com.client.Dispatch("Excel.Application")
+        _echo("③ファイルを自動で再計算中...")
+
+        # Excel を起動
+        try:
+            excel = win32com.client.Dispatch("Excel.Application")
+        except Exception as e:
+            _echo(f"⚠ Excel 起動に失敗: {e}")
+            _echo("  確認: Excel がインストールされていますか？")
+            return False
+
         excel.Visible = False  # 非表示で実行
         excel.DisplayAlerts = False  # 警告を抑止
 
         try:
-            _echo("③ファイルを自動で再計算中...")
             for file_path in files:
                 try:
+                    abs_path = os.path.abspath(file_path)
                     _echo(f"  → {os.path.basename(file_path)}")
-                    workbook = excel.Workbooks.Open(os.path.abspath(file_path))
+                    workbook = excel.Workbooks.Open(abs_path)
                     workbook.Save()  # 保存（数式を再計算させる）
                     workbook.Close()
                 except Exception as e:
@@ -63,11 +74,14 @@ def recalculate_kintai_files(kintai_dir: str, auto_save: bool = True) -> bool:
             _echo("✓ ③ファイルの再計算が完了しました")
             return True
         finally:
-            excel.Quit()
+            try:
+                excel.Quit()
+            except:
+                pass
 
     except Exception as e:
         # Excel の自動操作に失敗
-        _echo(f"⚠ Excel 自動実行に失敗: {e}")
+        _echo(f"⚠ Excel 自動実行に失敗: {type(e).__name__}: {e}")
         return False
 
 
