@@ -12,12 +12,63 @@ from __future__ import annotations
 
 import glob
 import os
+import sys
 
 DEFAULT_INPUT = "input"
 DEFAULT_OUT = "out"
 KINTAI_SUBDIR = "kintai"
 
 LINE = "─" * 60
+
+
+# ------------------------------------------------------------------ Excel 自動操作
+
+def recalculate_kintai_files(kintai_dir: str, auto_save: bool = True) -> bool:
+    """③ファイルをExcelで開いて保存し、数式を再計算する（自動化）。
+
+    pywin32 が使えなければ手動保存を促す。
+    Returns: True = 自動実行成功, False = 手動実行が必要
+    """
+    try:
+        import win32com.client  # noqa: F401
+    except ImportError:
+        # pywin32 がインストールされていない
+        return False
+
+    try:
+        import win32com.client
+
+        files = sorted(glob.glob(os.path.join(kintai_dir, "*.xlsx")) +
+                      glob.glob(os.path.join(kintai_dir, "*.xlsm")))
+
+        if not files:
+            return True  # ファイルがなければ何もしない
+
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = False  # 非表示で実行
+        excel.DisplayAlerts = False  # 警告を抑止
+
+        try:
+            _echo("③ファイルを自動で再計算中...")
+            for file_path in files:
+                try:
+                    _echo(f"  → {os.path.basename(file_path)}")
+                    workbook = excel.Workbooks.Open(os.path.abspath(file_path))
+                    workbook.Save()  # 保存（数式を再計算させる）
+                    workbook.Close()
+                except Exception as e:
+                    _echo(f"    ⚠ エラー: {e}")
+                    return False
+
+            _echo("✓ ③ファイルの再計算が完了しました")
+            return True
+        finally:
+            excel.Quit()
+
+    except Exception as e:
+        # Excel の自動操作に失敗
+        _echo(f"⚠ Excel 自動実行に失敗: {e}")
+        return False
 
 
 # ------------------------------------------------------------------ 入出力の補助
@@ -208,16 +259,28 @@ def run(
 
     _echo()
 
-    # 自動化モード（area が指定されている）では Excel の再保存ステップをスキップ
-    if area is None:
-        _echo("■ 次の②への集計の前に、ひと手間だけお願いします")
-        _echo("  上のフォルダの③を Excel で開いて、そのまま上書き保存してください（全ファイル）。")
-        _echo("  Excelが計算し直した金額を読み取るために必要です。")
+    # ③の数式を再計算（Excel で自動実行）
+    _echo("■ ③ファイルを再計算中...")
+    if recalculate_kintai_files(kintai_out, auto_save=True):
+        # 自動実行成功
         _echo()
+    else:
+        # 自動実行失敗 → 手動実行を促す（area が指定されていない場合のみ）
+        if area is None:
+            _echo()
+            _echo("⚠ Excel の自動実行がスキップされました。手動で実行してください。")
+            _echo("  上のフォルダの③を Excel で開いて、そのまま上書き保存してください（全ファイル）。")
+            _echo("  Excelが計算し直した金額を読み取るために必要です。")
+            _echo()
 
-        if not ask_yes("③をExcelで開いて保存しましたか？ ②への集計に進みます", default=False):
-            _echo("→ ここで終了します。保存が終わったら、もう一度「開始」して【3/3】だけ実行できます。")
-            return 0
+            if not ask_yes("③をExcelで開いて保存しましたか？ ②への集計に進みます", default=False):
+                _echo("→ ここで終了します。保存が終わったら、もう一度「開始」して【3/3】だけ実行できます。")
+                return 0
+        else:
+            # area が指定されている（自動化モード）なのに、Excel 自動実行が失敗
+            _echo("→ Excel の自動実行に失敗しました。")
+            _echo("   pywin32 が正しくインストールされているか確認してください。")
+            return 1
 
     # ---------------------------------------------------------- 3. ②へ集計
     _echo()
