@@ -1,27 +1,32 @@
 @echo off
 cd /d "%~dp0"
-title Šw“¶ ‹‹—^—\‘ª ©“®“]‹L
+title ï¿½wï¿½ï¿½ ï¿½ï¿½ï¿½^ï¿½\ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½]ï¿½L
 
-rem --- Python ‚ÌŠm”F ---
+rem --- Python ï¿½ÌŠmï¿½F ---
 where python >nul 2>nul
 if errorlevel 1 (
   echo.
-  echo  Python ‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñB
-  echo  https://www.python.org/downloads/windows/ ‚©‚çƒCƒ“ƒXƒg[ƒ‹‚µA
-  echo  ƒCƒ“ƒXƒg[ƒ‰‚ÌÅ‰‚Ì‰æ–Ê‚ÅuAdd python.exe to PATHv‚Éƒ`ƒFƒbƒN‚ğ
-  echo  “ü‚ê‚Ä‚©‚çAƒpƒ\ƒRƒ“‚ğÄ‹N“®‚µ‚ÄA‚à‚¤ˆê“x‚±‚ÌuŠJnv‚ğ‰Ÿ‚µ‚Ä‚­‚¾‚³‚¢B
+  echo  Python ï¿½ï¿½ï¿½ï¿½ï¿½Â‚ï¿½ï¿½ï¿½Ü‚ï¿½ï¿½ï¿½B
+  echo  https://www.python.org/downloads/windows/ ï¿½ï¿½ï¿½ï¿½Cï¿½ï¿½ï¿½Xï¿½gï¿½[ï¿½ï¿½ï¿½ï¿½ï¿½A
+  echo  ï¿½Cï¿½ï¿½ï¿½Xï¿½gï¿½[ï¿½ï¿½ï¿½ÌÅï¿½ï¿½Ì‰ï¿½Ê‚ÅuAdd python.exe to PATHï¿½vï¿½Éƒ`ï¿½Fï¿½bï¿½Nï¿½ï¿½
+  echo  ï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½Aï¿½pï¿½\ï¿½Rï¿½ï¿½ï¿½ï¿½ï¿½Ä‹Nï¿½ï¿½ï¿½ï¿½ï¿½ÄAï¿½ï¿½ï¿½ï¿½ï¿½ï¿½xï¿½ï¿½ï¿½Ìuï¿½Jï¿½nï¿½vï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½B
   echo.
   pause
   exit /b 1
 )
 
-rem --- •K—v‚Èƒ‰ƒCƒuƒ‰ƒŠ(openpyxl)‚ÌŠm”FB–³‚¯‚ê‚Î©“®‚Å“ü‚ê‚é ---
+rem --- ï¿½Kï¿½vï¿½Èƒï¿½ï¿½Cï¿½uï¿½ï¿½ï¿½ï¿½(openpyxl)ï¿½ÌŠmï¿½Fï¿½Bï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îï¿½ï¿½ï¿½ï¿½Å“ï¿½ï¿½ï¿½ï¿½ ---
 python -c "import openpyxl" >nul 2>nul
 if errorlevel 1 (
-  echo ‰‰ñ‚Ì€”õ‚ğ‚µ‚Ä‚¢‚Ü‚·B­‚µ‚¨‘Ò‚¿‚­‚¾‚³‚¢...
+  echo ï¿½ï¿½ï¿½ï¿½Ìï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä‚ï¿½ï¿½Ü‚ï¿½ï¿½Bï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò‚ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½...
   python -m pip install -r requirements.txt
 )
 
-python -m kyuyo wizard
+rem --- config.json ãŒã‚ã‚Œã°ä½¿ã†ï¼ˆfrom_day ã¨ area ã‚’è‡ªå‹•ã§å–å¾—ï¼‰ ---
+if exist config.json (
+  python -m kyuyo --config config.json wizard
+) else (
+  python -m kyuyo wizard
+)
 echo.
 pause
