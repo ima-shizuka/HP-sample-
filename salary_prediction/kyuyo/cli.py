@@ -237,7 +237,11 @@ def cmd_summary(args) -> int:
         return 0
 
     require_file(args.summary, "②全社集計")
-    out_path = args.out or os.path.join(args.out_dir or DEFAULT_OUT, os.path.basename(args.summary))
+    # --in-place なら元ファイルに直接書き込む。そうでなければ out フォルダにコピー
+    if args.in_place:
+        out_path = args.summary
+    else:
+        out_path = args.out or os.path.join(args.out_dir or DEFAULT_OUT, os.path.basename(args.summary))
     results = write_to_summary(
         args.summary, args.area, totals,
         start_row=args.start_row, output_path=out_path, dry_run=not args.write,
@@ -303,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sum.add_argument("--start-row", type=int, help="②の走査開始行（磐田=73）")
     p_sum.add_argument("--out", help="②の出力先ファイル")
     p_sum.add_argument("--out-dir", help=f"出力先フォルダ（既定: {DEFAULT_OUT}）")
+    p_sum.add_argument("--in-place", action="store_true", help="②の原本を直接書き換える（既定はコピーに書く）")
     p_sum.add_argument("--write", action="store_true", help="実際に②へ書き込む")
     p_sum.set_defaults(func=cmd_summary)
 

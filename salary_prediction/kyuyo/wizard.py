@@ -215,7 +215,7 @@ def run(base_dir: str = DEFAULT_INPUT, out_dir: str = DEFAULT_OUT) -> int:
     area = ask("②のシート名", "磐田")
     try:
         cli.main(["summary", "--kintai-dir", kintai_out, "--summary", found["summary"],
-                  "--area", area, "--out-dir", out_dir, "--write"])
+                  "--area", area, "--in-place", "--write"])
     except SystemExit as exc:
         if exc.code:
             _echo(f"\n{exc}")

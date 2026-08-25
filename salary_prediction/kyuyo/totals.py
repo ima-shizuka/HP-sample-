@@ -147,7 +147,7 @@ def write_to_summary(
         start_row = SUMMARY_START_ROWS.get(area_sheet, 73)
 
     dest = summary_path
-    if output_path and not dry_run:
+    if output_path and output_path != summary_path and not dry_run:
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
         shutil.copy2(summary_path, output_path)
         dest = output_path
