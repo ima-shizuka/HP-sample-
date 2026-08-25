@@ -113,7 +113,12 @@ def ensure_folders(base_dir: str = DEFAULT_INPUT) -> None:
 
 # ------------------------------------------------------------------ 本体
 
-def run(base_dir: str = DEFAULT_INPUT, out_dir: str = DEFAULT_OUT) -> int:
+def run(
+    base_dir: str = DEFAULT_INPUT,
+    out_dir: str = DEFAULT_OUT,
+    from_day: int | None = None,
+    area: str | None = None,
+) -> int:
     from . import cli  # 循環importを避けるためここで読み込む
 
     _echo(LINE)
@@ -146,10 +151,14 @@ def run(base_dir: str = DEFAULT_INPUT, out_dir: str = DEFAULT_OUT) -> int:
     _echo(f"  固定シフト : {os.path.basename(fixed_path) if fixed_path else '（無し。fixed_shifts.json を置くと①に出てこない先生も埋められます）'}")
     _echo()
 
-    from_day = ask("中締めの翌日（この日から埋めます）", "1")
-    if not from_day.isdigit() or not (1 <= int(from_day) <= 31):
+    if from_day is None:
+        from_day_str = ask("中締めの翌日（この日から埋めます）", "1")
+    else:
+        from_day_str = str(from_day)
+
+    if not from_day_str.isdigit() or not (1 <= int(from_day_str) <= 31):
         _echo("→ 1〜31 の数字で入れてください。1日から埋める設定にします。")
-        from_day = "1"
+        from_day_str = "1"
     _echo()
 
     # ---------------------------------------------------------- 1. レポート
@@ -157,7 +166,7 @@ def run(base_dir: str = DEFAULT_INPUT, out_dir: str = DEFAULT_OUT) -> int:
     _echo("【1/3】①を読んで、書き込み内容の一覧を作ります（まだ何も書き換えません）")
     _echo(LINE)
     common = ["--shift", found["shift"], "--kintai-dir", found["kintai_dir"],
-              "--from-day", from_day, "--out-dir", out_dir]
+              "--from-day", from_day_str, "--out-dir", out_dir]
     try:
         cli.main(["plan", *common, "--no-hint"])
     except SystemExit as exc:
@@ -198,21 +207,25 @@ def run(base_dir: str = DEFAULT_INPUT, out_dir: str = DEFAULT_OUT) -> int:
         return 0
 
     _echo()
-    _echo("■ 次の②への集計の前に、ひと手間だけお願いします")
-    _echo("  上のフォルダの③を Excel で開いて、そのまま上書き保存してください（全ファイル）。")
-    _echo("  Excelが計算し直した金額を読み取るために必要です。")
-    _echo()
 
-    if not ask_yes("③をExcelで開いて保存しましたか？ ②への集計に進みます", default=False):
-        _echo("→ ここで終了します。保存が終わったら、もう一度「開始」して【3/3】だけ実行できます。")
-        return 0
+    # 自動化モード（area が指定されている）では Excel の再保存ステップをスキップ
+    if area is None:
+        _echo("■ 次の②への集計の前に、ひと手間だけお願いします")
+        _echo("  上のフォルダの③を Excel で開いて、そのまま上書き保存してください（全ファイル）。")
+        _echo("  Excelが計算し直した金額を読み取るために必要です。")
+        _echo()
+
+        if not ask_yes("③をExcelで開いて保存しましたか？ ②への集計に進みます", default=False):
+            _echo("→ ここで終了します。保存が終わったら、もう一度「開始」して【3/3】だけ実行できます。")
+            return 0
 
     # ---------------------------------------------------------- 3. ②へ集計
     _echo()
     _echo(LINE)
     _echo("【3/3】③の合計を②に転記します")
     _echo(LINE)
-    area = ask("②のシート名", "磐田")
+    if area is None:
+        area = ask("②のシート名", "磐田")
     try:
         cli.main(["summary", "--kintai-dir", kintai_out, "--summary", found["summary"],
                   "--area", area, "--in-place", "--write"])

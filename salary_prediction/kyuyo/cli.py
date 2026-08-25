@@ -259,7 +259,12 @@ def cmd_summary(args) -> int:
 def cmd_wizard(args) -> int:
     from .wizard import run  # 循環importを避けるためここで読み込む
 
-    return run(args.input_dir or "input", args.out_dir or DEFAULT_OUT)
+    return run(
+        args.input_dir or "input",
+        args.out_dir or DEFAULT_OUT,
+        from_day=args.from_day,
+        area=args.area,
+    )
 
 
 # ------------------------------------------------------------------ パーサ
@@ -314,6 +319,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_wiz = sub.add_parser("wizard", help="対話モード（「開始」から呼ばれる。input フォルダを自動で読む）")
     p_wiz.add_argument("--input-dir", help="①②③を置いたフォルダ（既定: input）")
     p_wiz.add_argument("--out-dir", help=f"出力先フォルダ（既定: {DEFAULT_OUT}）")
+    p_wiz.add_argument("--from-day", type=int, help="この日から埋める（未指定なら入力を促す）")
+    p_wiz.add_argument("--area", help="②のシート名（未指定なら入力を促す）")
     p_wiz.set_defaults(func=cmd_wizard)
     return parser
 
