@@ -10,8 +10,10 @@ input フォルダに置かれたファイルを自動で見つけ、
 
 from __future__ import annotations
 
+import getpass
 import glob
 import os
+import shutil
 import sys
 
 DEFAULT_INPUT = "input"
@@ -82,6 +84,89 @@ def recalculate_kintai_files(kintai_dir: str, auto_save: bool = True) -> bool:
     except Exception as e:
         # Excel の自動操作に失敗
         _echo(f"⚠ Excel 自動実行に失敗: {type(e).__name__}: {e}")
+        return False
+
+
+# ------------------------------------------------------------------ VBA マクロ実行
+
+def run_vba_macro_and_copy_files(
+    kintai_files: list,
+    summary_path: str,
+    dest_folder: str,
+    vba_module: str = "磐田給与予績",
+    vba_macro: str = "磐田給与予測",
+) -> bool:
+    """③を別フォルダにコピーして、summary.xlsm の VBA マクロを実行。
+
+    Returns: True = 成功, False = 失敗
+    """
+    try:
+        import win32com.client
+    except ImportError:
+        _echo("⚠ pywin32 がインストールされていません。")
+        return False
+
+    try:
+        # 1. ファイルをコピー
+        _echo("■ ファイルを別フォルダにコピー中...")
+        os.makedirs(dest_folder, exist_ok=True)
+
+        # ③ファイルをコピー
+        for kintai_file in kintai_files:
+            dest_path = os.path.join(dest_folder, os.path.basename(kintai_file))
+            _echo(f"  → {os.path.basename(kintai_file)}")
+            shutil.copy2(kintai_file, dest_path)
+
+        # summary.xlsm をコピー
+        summary_dest = os.path.join(dest_folder, os.path.basename(summary_path))
+        _echo(f"  → {os.path.basename(summary_path)}")
+        shutil.copy2(summary_path, summary_dest)
+
+        _echo("✓ ファイルのコピーが完了しました")
+
+        # 2. VBA マクロを実行
+        _echo()
+        _echo("■ Excel VBA マクロ「磐田給与予測」を実行中...")
+
+        excel = win32com.client.Dispatch("Excel.Application")
+        excel.Visible = False
+        excel.DisplayAlerts = False
+
+        try:
+            workbook = excel.Workbooks.Open(os.path.abspath(summary_dest))
+
+            # VBA マクロを実行
+            # 書式: Workbook!Module.Macro
+            workbook_name = os.path.splitext(os.path.basename(summary_dest))[0]
+            macro_path = f"{workbook_name}!{vba_macro}"
+
+            try:
+                excel.Run(macro_path)
+            except Exception as vba_error:
+                # 失敗時は別の方法を試す
+                _echo(f"  ⚠ VBA 実行方法1が失敗、方法2を試します: {vba_error}")
+                try:
+                    # 方法2: VBProject 経由でアクセス
+                    vba_module_obj = workbook.VBProject.VBComponents(vba_module)
+                    vba_module_obj.CodeModule.Run(vba_macro)
+                except Exception as vba_error2:
+                    _echo(f"  ⚠ VBA 実行方法2も失敗: {vba_error2}")
+                    raise vba_error2
+
+            workbook.Save()
+            workbook.Close()
+
+            _echo("✓ VBA マクロが完了しました")
+            return True
+
+        finally:
+            try:
+                excel.Quit()
+            except:
+                pass
+
+    except Exception as e:
+        _echo(f"⚠ VBA 実行に失敗: {type(e).__name__}: {e}")
         return False
 
 
@@ -312,7 +397,49 @@ def run(
             return 1
 
     _echo()
-    _echo(f"→ 完成したファイルは {os.path.abspath(out_dir)} にあります。")
+
+    # ---------------------------------------------------------- 4. VBA マクロ実行 + ファイル配置
+    _echo(LINE)
+    _echo("【4/4】ファイルを配置して VBA マクロを実行します")
+    _echo(LINE)
+
+    # コピー先フォルダを取得（config.json or 入力）
+    # ※デフォルトは Windows ユーザーのマイボックスを推定
+    try:
+        import getpass
+        username = getpass.getuser()
+        default_dest = f"D:\\マイボックス\\【{username}個人フォルダー】\\2. 給与関係"
+    except:
+        default_dest = ""
+
+    if not default_dest or not os.path.exists(os.path.dirname(default_dest)):
+        dest_folder = ask(
+            "コピー先フォルダパス\n"
+            "（例: D:\\マイボックス\\【今泉個人フォルダー】\\2. 給与関係）",
+            default_dest or "D:\\マイボックス\\【...】\\2. 給与関係"
+        )
+    else:
+        dest_folder = default_dest
+
+    # ③ファイルのリストを取得
+    kintai_files = sorted(
+        glob.glob(os.path.join(kintai_out, "*.xlsx")) +
+        glob.glob(os.path.join(kintai_out, "*.xlsm"))
+    )
+
+    # VBA マクロを実行 + ファイルをコピー
+    if run_vba_macro_and_copy_files(kintai_files, found["summary"], dest_folder):
+        _echo()
+        _echo("✓ 【4/4】完了！")
+        _echo(f"→ ファイルは {os.path.abspath(dest_folder)} に配置されました。")
+        _echo("  VBA マクロ「磐田給与予測」が実行されました。")
+    else:
+        _echo()
+        _echo("⚠ VBA マクロ実行に失敗しました。")
+        _echo("  Excel がインストールされているか確認してください。")
+
+    _echo()
+    _echo(f"→ 出力フォルダは {os.path.abspath(out_dir)} にもあります。")
     _echo("  金額を目視確認してから、正式な給与計算に使ってください。")
-    open_in_explorer(out_dir)
+    open_in_explorer(dest_folder if os.path.exists(dest_folder) else out_dir)
     return 0
