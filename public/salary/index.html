@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>月給予測ノート</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: 給与明細の帳票をモチーフに、左に勤怠・シフト台帳、右に固定の明細サマリー */
+:root {
+  --paper: #f3f6f4;
+  --sheet: #ffffff;
+  --ink: #17251f;
+  --muted: #5b6b64;
+  --rule: #cfdcd5;
+  --rule-strong: #9fb5aa;
+  --accent: #1d6b56;
+  --accent-soft: #e2efe9;
+  --plan: #b7791f;
+  --plan-soft: #faf0dc;
+  --warn: #b4442c;
+  --ok: #2c7a4b;
+  --font-display: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", sans-serif;
+  --font-body: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #101614; --sheet: #17201d; --ink: #e4ece8; --muted: #9aaba3;
+    --rule: #2b3934; --rule-strong: #46594f; --accent: #5cc3a1; --accent-soft: #1d332b;
+    --plan: #e0a84c; --plan-soft: #33291a; --warn: #ef8a72; --ok: #6fcf97;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #101614; --sheet: #17201d; --ink: #e4ece8; --muted: #9aaba3;
+  --rule: #2b3934; --rule-strong: #46594f; --accent: #5cc3a1; --accent-soft: #1d332b;
+  --plan: #e0a84c; --plan-soft: #33291a; --warn: #ef8a72; --ok: #6fcf97;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font-family: var(--font-body); font-size: 14px; line-height: 1.6;
+}
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; }
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; border-bottom: 2px solid var(--ink); padding-bottom: 12px; }
+header.top h1 { font-family: var(--font-display); font-weight: 900; font-size: 1.6rem; margin: 0; letter-spacing: .04em; text-wrap: balance; }
+header.top p { margin: 2px 0 0; color: var(--muted); font-size: .85rem; }
+.period { font-family: var(--font-num); font-size: .85rem; color: var(--muted); text-align: right; }
+.period b { color: var(--ink); font-weight: 600; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; margin-top: 20px; align-items: start; }
+@media (max-width: 960px) { .grid { grid-template-columns: minmax(0, 1fr); } .side { order: -1; } }
+.main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.side { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); min-width: 0; }
+@media (max-width: 960px) { .side { position: static; } }
+
+.panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+.panel > summary, .panel > .ph { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; font-weight: 700; border-bottom: 1px solid transparent; }
+.panel[open] > summary, .panel > .ph { border-bottom-color: var(--rule); }
+.panel > summary::-webkit-details-marker { display: none; }
+.panel > summary::after { content: "＋"; color: var(--muted); font-weight: 400; }
+.panel[open] > summary::after { content: "－"; }
+.panel > .ph { cursor: default; }
+.ph-sub { font-weight: 400; color: var(--muted); font-size: .8rem; }
+.pb { padding: 14px 16px 16px; }
+.step { display: inline-flex; align-items: center; justify-content: center; width: 1.6em; height: 1.6em; border-radius: 50%; background: var(--ink); color: var(--sheet); font-size: .75rem; margin-right: 8px; font-family: var(--font-num); }
+
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px 14px; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field label, .lbl { font-size: .75rem; color: var(--muted); letter-spacing: .04em; }
+.field .hint { font-size: .7rem; color: var(--muted); }
+input, select { font: inherit; color: var(--ink); background: var(--sheet); border: 1px solid var(--rule-strong); border-radius: 4px; padding: 6px 8px; min-width: 0; width: 100%; }
+input[type="number"], input[type="time"] { font-family: var(--font-num); }
+input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.inline { display: flex; align-items: center; gap: 6px; }
+.unit { color: var(--muted); font-size: .8rem; white-space: nowrap; }
+.sep { grid-column: 1 / -1; border-top: 1px dashed var(--rule); margin: 4px 0 0; padding-top: 10px; font-size: .78rem; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+
+.seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 4px; overflow: hidden; }
+.seg button { font: inherit; font-size: .8rem; border: 0; background: transparent; color: var(--muted); padding: 5px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+
+.btn { font: inherit; font-size: .8rem; border: 1px solid var(--rule-strong); background: var(--sheet); color: var(--ink); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--sheet); }
+.btn.primary:hover { filter: brightness(1.08); color: var(--sheet); }
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.toolbar .grow { flex: 1; }
+
+/* 台帳 */
+.ledger-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; }
+table.ledger { border-collapse: collapse; width: 100%; min-width: 820px; font-size: .82rem; }
+.ledger th, .ledger td { border-bottom: 1px solid var(--rule); padding: 4px 6px; text-align: left; vertical-align: middle; }
+.ledger thead th { background: var(--accent-soft); font-weight: 500; font-size: .72rem; letter-spacing: .04em; color: var(--muted); position: sticky; top: 0; white-space: nowrap; }
+.ledger td.num, .ledger th.num { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ledger td.date { font-family: var(--font-num); white-space: nowrap; }
+.ledger tr.sun td.date, .ledger tr.sun td.dow { color: var(--warn); }
+.ledger tr.sat td.dow { color: var(--accent); }
+.ledger tr.cut td { border-bottom: 2px solid var(--ink); }
+.ledger tr.off td.num { color: var(--muted); }
+.ledger input[type="time"] { width: 7.2em; padding: 3px 4px; }
+.ledger input[type="number"] { width: 4.6em; padding: 3px 4px; }
+.ledger select { width: 7em; padding: 3px 4px; font-size: .78rem; }
+.chip { display: inline-block; font-size: .68rem; padding: 1px 7px; border-radius: 999px; font-weight: 700; letter-spacing: .04em; white-space: nowrap; }
+.chip.act { background: var(--accent-soft); color: var(--accent); }
+.chip.plan { background: var(--plan-soft); color: var(--plan); }
+.ledger tr.is-plan td:first-child { box-shadow: inset 3px 0 0 var(--plan); }
+.ledger tr.is-act td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.ledger tfoot td { background: var(--accent-soft); font-weight: 700; border-bottom: 0; }
+
+.totals-form { border: 1px dashed var(--accent); border-radius: 4px; padding: 12px; margin-bottom: 12px; background: var(--accent-soft); }
+.totals-form .lbl-head { font-weight: 700; font-size: .85rem; margin: 0 0 8px; color: var(--accent); }
+
+.presets { display: flex; flex-direction: column; gap: 6px; }
+.preset-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, .8fr) auto; gap: 6px; align-items: center; }
+@media (max-width: 520px) { .preset-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+
+/* 明細 */
+.slip { background: var(--sheet); border: 1px solid var(--rule-strong); border-radius: 6px; overflow: hidden; }
+.slip-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--rule); }
+.slip-head .lbl { display: block; }
+.big { font-family: var(--font-num); font-size: 2.1rem; font-weight: 600; letter-spacing: -.01em; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.big small { font-size: .9rem; font-weight: 500; margin-left: 2px; }
+.split { display: flex; height: 8px; border-radius: 2px; overflow: hidden; margin: 10px 0 6px; background: var(--rule); }
+.split .a { background: var(--accent); }
+.split .p { background: repeating-linear-gradient(135deg, var(--plan) 0 4px, var(--plan-soft) 4px 7px); }
+.legend { display: flex; justify-content: space-between; gap: 8px; font-size: .75rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.legend .ia { background: var(--accent); }
+.legend .ip { background: var(--plan); }
+.slip-sec { padding: 10px 16px; border-bottom: 1px solid var(--rule); }
+.slip-sec h3 { margin: 0 0 4px; font-size: .72rem; letter-spacing: .14em; color: var(--muted); font-weight: 700; }
+.row { display: flex; justify-content: space-between; gap: 10px; padding: 2px 0; font-size: .85rem; }
+.row span:last-child { font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.row.sub span:first-child { color: var(--muted); padding-left: .8em; font-size: .8rem; }
+.row.sub span:last-child { color: var(--muted); font-size: .8rem; }
+.row.total { border-top: 1px solid var(--rule); margin-top: 4px; padding-top: 6px; font-weight: 700; }
+.net { padding: 12px 16px; background: var(--ink); color: var(--sheet); display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.net span:last-child { font-family: var(--font-num); font-size: 1.35rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.hours { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
+.hours div { background: var(--paper); border-radius: 4px; padding: 6px 2px; }
+.hours b { display: block; font-family: var(--font-num); font-size: .95rem; font-variant-numeric: tabular-nums; }
+.hours span { font-size: .68rem; color: var(--muted); }
+.walls { display: flex; flex-direction: column; gap: 4px; font-size: .78rem; }
+.walls div { display: flex; justify-content: space-between; gap: 8px; }
+.pill { font-size: .68rem; font-weight: 700; padding: 0 7px; border-radius: 999px; white-space: nowrap; }
+.pill.over { background: var(--warn); color: var(--sheet); }
+.pill.under { background: var(--accent-soft); color: var(--ok); }
+.note { font-size: .72rem; color: var(--muted); margin: 10px 2px 0; }
+footer.notes { margin-top: 28px; font-size: .75rem; color: var(--muted); max-width: 72ch; }
+footer.notes li { margin-bottom: 4px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (prefers-reduced-motion: no-preference) { .split > div { transition: width .25s ease; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>月給予測ノート</h1>
+      <p>中締めの勤怠実績と残りのシフトから、今月の総支給額と手取りを見込みます。</p>
+    </div>
+    <div class="period" id="periodLabel"></div>
+  </header>
+
+  <div class="grid">
+    <div class="main">
+
+      <details class="panel" id="panelSettings" open>
+        <summary><span><span class="step">1</span>給与の条件</span><span class="ph-sub">時給・割増率・締め日</span></summary>
+        <div class="pb">
+          <div class="fields">
+            <div class="field">
+              <label for="payType">給与形態</label>
+              <select id="payType"><option value="hourly">時給制</option><option value="monthly">月給制</option></select>
+            </div>
+            <div class="field" data-show="hourly">
+              <label for="hourlyRate">時給</label>
+              <div class="inline"><input id="hourlyRate" type="number" min="0" step="1"><span class="unit">円</span></div>
+            </div>
+            <div class="field" data-show="monthly">
+              <label for="monthlyBase">基本給（月額）</label>
+              <div class="inline"><input id="monthlyBase" type="number" min="0" step="100"><span class="unit">円</span></div>
+            </div>
+            <div class="field" data-show="monthly">
+              <label for="avgHours">月平均所定労働時間</label>
+              <div class="inline"><input id="avgHours" type="number" min="1" step="0.1"><span class="unit">時間</span></div>
+              <span class="hint">割増の時間単価 = 基本給 ÷ この時間</span>
+            </div>
+            <div class="field">
+              <label for="month">対象月（支給対象の締め月）</label>
+              <input id="month" type="month">
+            </div>
+            <div class="field">
+              <label for="closing">締め日</label>
+              <select id="closing"></select>
+            </div>
+            <div class="field">
+              <label for="midClose">中締め日（ここまでが実績）</label>
+              <input id="midClose" type="date">
+            </div>
+
+            <div class="sep">割増率</div>
+            <div class="field">
+              <label for="rateNight">深夜（22時〜翌5時）</label>
+              <div class="inline"><input id="rateNight" type="number" min="0" step="1"><span class="unit">%</span></div>
+            </div>
+            <div class="field">
+              <label for="rateOt">時間外（1日8時間超）</label>
+              <div class="inline"><input id="rateOt" type="number" min="0" step="1"><span class="unit">%</span></div>
+            </div>
+            <div class="field">
+              <label for="rateHol">休日（法定休日の労働）</label>
+              <div class="inline"><input id="rateHol" type="number" min="0" step="1"><span class="unit">%</span></div>
+            </div>
+            <div class="field">
+              <label for="otLimit">時間外の起算</label>
+              <div class="inline"><input id="otLimit" type="number" min="0" step="0.5"><span class="unit">時間/日 超</span></div>
+            </div>
+            <div class="field">
+              <label for="roundUnit">労働時間の端数（1日ごと）</label>
+              <select id="roundUnit"><option value="1">1分単位</option><option value="5">5分未満切捨て</option><option value="15">15分未満切捨て</option><option value="30">30分未満切捨て</option></select>
+            </div>
+
+            <div class="sep">手当・交通費</div>
+            <div class="field">
+              <label for="allowance">固定手当（月額・課税）</label>
+              <div class="inline"><input id="allowance" type="number" min="0" step="100"><span class="unit">円</span></div>
+            </div>
+            <div class="field">
+              <label for="transType">交通費の支給方法</label>
+              <select id="transType"><option value="daily">1日あたり × 出勤日数</option><option value="monthly">月額固定</option><option value="none">なし</option></select>
+            </div>
+            <div class="field">
+              <label for="transAmount" id="transLabel">交通費</label>
+              <div class="inline"><input id="transAmount" type="number" min="0" step="10"><span class="unit">円</span></div>
+              <span class="hint">非課税（月15万円まで）として扱います</span>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="panel" id="panelDeduct">
+        <summary><span><span class="step">2</span>控除の条件（手取りの目安）</span><span class="ph-sub">社会保険・税金</span></summary>
+        <div class="pb">
+          <div class="fields">
+            <div class="field">
+              <label for="siOn">社会保険（健保・厚生年金）</label>
+              <select id="siOn"><option value="1">加入している</option><option value="0">加入していない</option></select>
+            </div>
+            <div class="field" data-si>
+              <label for="stdPay">標準報酬月額</label>
+              <div class="inline"><input id="stdPay" type="number" min="0" step="1000" placeholder="空欄で自動"><span class="unit">円</span></div>
+              <span class="hint">空欄なら今月の総支給から等級を推定</span>
+            </div>
+            <div class="field" data-si>
+              <label for="rateHealth">健康保険料率（本人負担）</label>
+              <div class="inline"><input id="rateHealth" type="number" min="0" step="0.001"><span class="unit">%</span></div>
+            </div>
+            <div class="field" data-si>
+              <label for="rateCare">介護保険料率（40〜64歳）</label>
+              <div class="inline"><input id="rateCare" type="number" min="0" step="0.001"><span class="unit">%</span></div>
+              <span class="hint">対象外なら 0</span>
+            </div>
+            <div class="field" data-si>
+              <label for="ratePension">厚生年金保険料率（本人負担）</label>
+              <div class="inline"><input id="ratePension" type="number" min="0" step="0.001"><span class="unit">%</span></div>
+            </div>
+            <div class="field">
+              <label for="rateEmp">雇用保険料率（本人負担）</label>
+              <div class="inline"><input id="rateEmp" type="number" min="0" step="0.01"><span class="unit">%</span></div>
+              <span class="hint">未加入なら 0</span>
+            </div>
+            <div class="field">
+              <label for="taxMode">所得税</label>
+              <select id="taxMode"><option value="kou">源泉徴収（甲欄）</option><option value="none">計算しない</option></select>
+            </div>
+            <div class="field">
+              <label for="dependents">扶養親族の人数</label>
+              <div class="inline"><input id="dependents" type="number" min="0" step="1"><span class="unit">人</span></div>
+            </div>
+            <div class="field">
+              <label for="residentTax">住民税（月額）</label>
+              <div class="inline"><input id="residentTax" type="number" min="0" step="100"><span class="unit">円</span></div>
+            </div>
+            <div class="field">
+              <label for="otherDeduct">その他の控除</label>
+              <div class="inline"><input id="otherDeduct" type="number" min="0" step="100"><span class="unit">円</span></div>
+            </div>
+          </div>
+          <p class="note">料率は加入している健保・年度によって異なります。給与明細の数字に合わせて調整してください。</p>
+        </div>
+      </details>
+
+      <details class="panel" id="panelPresets">
+        <summary><span><span class="step">3</span>シフトのパターン</span><span class="ph-sub">台帳でワンタップ入力に使います</span></summary>
+        <div class="pb">
+          <div class="presets" id="presetList"></div>
+          <div class="toolbar" style="margin-top:10px;margin-bottom:0"><button class="btn" id="addPreset" type="button">パターンを追加</button></div>
+        </div>
+      </details>
+
+      <section class="panel">
+        <div class="ph"><span><span class="step">4</span>勤怠・シフト台帳</span><span class="ph-sub" id="ledgerSub"></span></div>
+        <div class="pb">
+          <div class="toolbar">
+            <span class="lbl">中締めまでの実績の入力方法</span>
+            <div class="seg" role="group" aria-label="実績の入力方法">
+              <button type="button" id="modeDaily" aria-pressed="true">日別</button>
+              <button type="button" id="modeTotal" aria-pressed="false">合計で入力</button>
+            </div>
+            <span class="grow"></span>
+            <label class="sr" for="bulkPreset">予定の空欄に一括入力するパターン</label>
+            <select id="bulkPreset" style="width:auto"></select>
+            <label class="sr" for="bulkDow">曜日</label>
+            <select id="bulkDow" style="width:auto">
+              <option value="all">全曜日</option><option value="wd">平日</option><option value="we">土日</option>
+              <option value="1">月</option><option value="2">火</option><option value="3">水</option><option value="4">木</option><option value="5">金</option><option value="6">土</option><option value="0">日</option>
+            </select>
+            <button class="btn" type="button" id="bulkApply">予定の空欄に入れる</button>
+            <button class="btn" type="button" id="clearPlan">予定をクリア</button>
+          </div>
+
+          <div class="totals-form" id="totalsForm" hidden>
+            <p class="lbl-head">中締め（勤怠集計）の数字を転記してください</p>
+            <div class="fields">
+              <div class="field"><label for="tDays">出勤日数</label><div class="inline"><input id="tDays" type="number" min="0" step="1"><span class="unit">日</span></div></div>
+              <div class="field"><label for="tHours">総労働時間</label><div class="inline"><input id="tHours" type="number" min="0" step="0.01"><span class="unit">時間</span></div><span class="hint">7時間30分 → 7.5</span></div>
+              <div class="field"><label for="tNight">うち深夜</label><div class="inline"><input id="tNight" type="number" min="0" step="0.01"><span class="unit">時間</span></div></div>
+              <div class="field"><label for="tOt">うち時間外</label><div class="inline"><input id="tOt" type="number" min="0" step="0.01"><span class="unit">時間</span></div></div>
+              <div class="field"><label for="tHol">うち休日</label><div class="inline"><input id="tHol" type="number" min="0" step="0.01"><span class="unit">時間</span></div></div>
+            </div>
+          </div>
+
+          <div class="ledger-wrap">
+            <table class="ledger" id="ledger">
+              <thead>
+                <tr>
+                  <th>日付</th><th>曜</th><th>区分</th><th>パターン</th><th>開始</th><th>終了</th><th>休憩(分)</th><th title="法定休日の労働">休日</th>
+                  <th class="num">労働</th><th class="num">深夜</th><th class="num">時間外</th><th class="num">見込額</th>
+                </tr>
+              </thead>
+              <tbody id="ledgerBody"></tbody>
+              <tfoot id="ledgerFoot"></tfoot>
+            </table>
+          </div>
+          <p class="note">終了が開始より早い時刻なら日をまたぐ勤務として計算します（例: 22:00〜07:00）。休憩はシフトの中間で取る前提です。</p>
+        </div>
+      </section>
+    </div>
+
+    <aside class="side">
+      <div class="slip" aria-live="polite">
+        <div class="slip-head">
+          <span class="lbl">今月の総支給額（予測）</span>
+          <div class="big" id="sGross">0<small>円</small></div>
+          <div class="split" aria-hidden="true"><div class="a" id="barA"></div><div class="p" id="barP"></div></div>
+          <div class="legend">
+            <span><i class="ia"></i>実績 <span id="sAct">0円</span></span>
+            <span><i class="ip"></i>シフト予定 <span id="sPlan">0円</span></span>
+          </div>
+        </div>
+        <div class="slip-sec">
+          <div class="hours">
+            <div><b id="hDays">0</b><span>出勤日数</span></div>
+            <div><b id="hTotal">0:00</b><span>労働</span></div>
+            <div><b id="hNight">0:00</b><span>深夜</span></div>
+            <div><b id="hOt">0:00</b><span>時間外</span></div>
+          </div>
+        </div>
+        <div class="slip-sec" id="secPay">
+          <h3>支給</h3>
+          <div id="payRows"></div>
+        </div>
+        <div class="slip-sec" id="secDeduct">
+          <h3>控除（目安）</h3>
+          <div id="deductRows"></div>
+        </div>
+        <div class="net"><span>差引支給額（手取り見込み）</span><span id="sNet">0円</span></div>
+        <div class="slip-sec" style="border-bottom:0">
+          <h3>年収の目安（この月 × 12）</h3>
+          <div class="walls" id="walls"></div>
+        </div>
+      </div>
+      <p class="note">入力内容はこのブラウザにだけ保存されます。</p>
+      <div class="toolbar" style="margin-top:8px">
+        <button class="btn" type="button" id="copySummary">結果をコピー</button>
+        <button class="btn" type="button" id="resetAll">サンプルに戻す</button>
+        <span class="unit" id="copyMsg" role="status"></span>
+      </div>
+      <div id="resetConfirm" class="toolbar" hidden>
+        <span class="unit">入力をすべて消してサンプルに戻しますか？</span>
+        <button class="btn primary" type="button" id="resetYes">戻す</button>
+        <button class="btn" type="button" id="resetNo">やめる</button>
+      </div>
+    </aside>
+  </div>
+
+  <footer class="notes">
+    <ul>
+      <li>時間外は「1日の起算時間を超えた分」で計算しています。週40時間超の時間外や変形労働時間制は含みません。</li>
+      <li>深夜と時間外が重なる時間は両方の割増（例: 25% + 25% = 50%）、法定休日の深夜は休日 + 深夜で計算します。</li>
+      <li>所得税は月額表（甲欄）の電算機計算の特例を使った概算で、2026年分の基礎控除・給与所得控除の改正を反映しています。社会保険料は標準報酬月額の等級表から計算します。</li>
+      <li>最初に表示される数字はサンプルです。自分の条件と勤怠に書き換えてください。</li>
+    </ul>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var STORE_KEY = "kyuyo-yosoku-v1";
+  var DOW = ["日", "月", "火", "水", "木", "金", "土"];
+
+  // ---------- 日付ユーティリティ ----------
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function iso(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function parseIso(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function addDays(d, n) { var x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; }
+  function lastDay(y, m) { return new Date(y, m + 1, 0).getDate(); }
+  function toMin(t) { if (!t) return null; var p = t.split(":"); return (+p[0]) * 60 + (+p[1]); }
+  function hm(min) { min = Math.round(min); var s = min < 0 ? "-" : ""; min = Math.abs(min); return s + Math.floor(min / 60) + ":" + pad(min % 60); }
+  function yen(n) { return Math.round(n).toLocaleString("ja-JP") + "円"; }
+  function num(v, d) { var x = parseFloat(v); return isFinite(x) ? x : (d || 0); }
+
+  function getPeriod(st) {
+    var p = st.month.split("-"), y = +p[0], m = +p[1] - 1, start, end;
+    if (st.closing === "end") {
+      start = new Date(y, m, 1); end = new Date(y, m, lastDay(y, m));
+    } else {
+      var n = +st.closing;
+      end = new Date(y, m, Math.min(n, lastDay(y, m)));
+      var pm = m - 1, py = y; if (pm < 0) { pm = 11; py--; }
+      start = addDays(new Date(py, pm, Math.min(n, lastDay(py, pm))), 1);
+    }
+    var days = [];
+    for (var d = start; d <= end; d = addDays(d, 1)) days.push(d);
+    return { start: start, end: end, days: days };
+  }
+
+  // ---------- 初期データ（サンプル） ----------
+  function sampleState() {
+    var today = new Date(2026, 9, 6);
+    var st = {
+      payType: "hourly", hourlyRate: 1250, monthlyBase: 220000, avgHours: 165,
+      month: today.getFullYear() + "-" + pad(today.getMonth() + 1), closing: "end", midClose: "",
+      rateNight: 25, rateOt: 25, rateHol: 35, otLimit: 8, roundUnit: "1",
+      allowance: 0, transType: "daily", transAmount: 480,
+      siOn: "1", stdPay: "", rateHealth: 4.955, rateCare: 0.795, ratePension: 9.15, rateEmp: 0.5,
+      taxMode: "kou", dependents: 0, residentTax: 0, otherDeduct: 0,
+      actualMode: "daily", totals: { days: 9, hours: 68.5, night: 6, ot: 1, hol: 0 },
+      presets: [
+        { name: "早番", s: "09:00", e: "17:00", b: 60 },
+        { name: "中番", s: "12:00", e: "20:00", b: 60 },
+        { name: "遅番", s: "16:00", e: "23:00", b: 45 },
+        { name: "通し", s: "10:00", e: "20:00", b: 60 }
+      ],
+      shifts: {}
+    };
+    var per = getPeriod(st);
+    st.midClose = iso(addDays(per.start, 15));
+    // 実績（1〜16日）と予定（17日〜）のサンプル
+    var pattern = { 1: 0, 2: 2, 3: 1, 5: 3, 6: 0 }; // 曜日 → パターン番号（木・日は休み）
+    var act = { "2026-10-03": { s: "11:58", e: "21:12", b: 60 }, "2026-10-09": { s: "15:55", e: "23:30", b: 45 }, "2026-10-12": { s: "09:00", e: "18:40", b: 60 } };
+    per.days.forEach(function (d) {
+      var k = iso(d), dw = d.getDay();
+      if (act[k]) { st.shifts[k] = Object.assign({ hol: false }, act[k]); return; }
+      if (pattern[dw] !== undefined) {
+        var p = st.presets[pattern[dw]];
+        st.shifts[k] = { s: p.s, e: p.e, b: p.b, hol: false };
+      }
+    });
+    return st;
+  }
+
+  var state;
+  try { state = JSON.parse(localStorage.getItem(STORE_KEY)); } catch (e) { state = null; }
+  if (!state || !state.shifts) state = sampleState();
+  function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* 保存できない環境でも動作させる */ } }
+
+  // ---------- 1日の計算 ----------
+  function nightAt(m) { var t = ((m % 1440) + 1440) % 1440; return t < 300 || t >= 1320; }
+  function calcDay(sh) {
+    var r = { work: 0, night: 0, ot: 0, otNight: 0, hol: 0 };
+    if (!sh || !sh.s || !sh.e) return r;
+    var s = toMin(sh.s), e = toMin(sh.e);
+    if (e <= s) e += 1440;
+    var span = e - s, b = Math.min(Math.max(0, num(sh.b)), span);
+    var bStart = s + Math.floor((span - b) / 2), bEnd = bStart + b; // 休憩は勤務の中間
+    var unit = +state.roundUnit || 1;
+    var limit = (span - b);
+    limit = Math.floor(limit / unit) * unit; // 端数は終業側から切り捨て
+    var otFrom = num(state.otLimit, 8) * 60, worked = 0;
+    for (var m = s; m < e && worked < limit; m++) {
+      if (m >= bStart && m < bEnd) continue;
+      worked++;
+      var n = nightAt(m), over = !sh.hol && worked > otFrom;
+      if (n) r.night++;
+      if (over) { r.ot++; if (n) r.otNight++; }
+    }
+    r.work = worked;
+    if (sh.hol) r.hol = worked;
+    return r;
+  }
+
+  function payFor(b) {
+    // b: {work, night, ot, hol}（分）
+    var nr = num(state.rateNight) / 100, or = num(state.rateOt) / 100, hr = num(state.rateHol) / 100;
+    if (state.payType === "hourly") {
+      var rate = num(state.hourlyRate);
+      return {
+        base: b.work / 60 * rate,
+        night: b.night / 60 * rate * nr,
+        ot: b.ot / 60 * rate * or,
+        hol: b.hol / 60 * rate * hr
+      };
+    }
+    var unitRate = num(state.monthlyBase) / Math.max(1, num(state.avgHours, 1));
+    return {
+      base: 0,
+      night: b.night / 60 * unitRate * nr,
+      ot: b.ot / 60 * unitRate * (1 + or),
+      hol: b.hol / 60 * unitRate * (1 + hr)
+    };
+  }
+  function sumPay(p) { return p.base + p.night + p.ot + p.hol; }
+
+  // ---------- 社会保険・税 ----------
+  var HEALTH_GRADES = [[63000,58000],[73000,68000],[83000,78000],[93000,88000],[101000,98000],[107000,104000],[114000,110000],[122000,118000],[130000,126000],[138000,134000],[146000,142000],[155000,150000],[165000,160000],[175000,170000],[185000,180000],[195000,190000],[210000,200000],[230000,220000],[250000,240000],[270000,260000],[290000,280000],[310000,300000],[330000,320000],[350000,340000],[370000,360000],[395000,380000],[425000,410000],[455000,440000],[485000,470000],[515000,500000],[545000,530000],[575000,560000],[605000,590000],[635000,620000],[665000,650000],[695000,680000],[730000,710000],[770000,750000],[810000,790000],[855000,830000],[905000,880000],[955000,930000],[1005000,980000],[1055000,1030000],[1115000,1090000],[1175000,1150000],[1235000,1210000],[1295000,1270000],[1355000,1330000],[Infinity,1390000]];
+  function stdGrade(pay) { for (var i = 0; i < HEALTH_GRADES.length; i++) if (pay < HEALTH_GRADES[i][0]) return HEALTH_GRADES[i][1]; return 1390000; }
+  // 被保険者負担分の端数: 50銭以下切捨て、50銭超切上げ
+  function round50(x) { var f = Math.floor(x); return (x - f) > 0.5 ? f + 1 : f; }
+
+  function incomeTax(a, deps) {
+    // 月額表・甲欄 電算機計算の特例（2026年分の控除額）
+    if (a <= 0) return 0;
+    var kyuyo;
+    if (a <= 158333) kyuyo = 54167;
+    else if (a <= 299999) kyuyo = a * 0.3 + 6667;
+    else if (a <= 549999) kyuyo = a * 0.2 + 36667;
+    else if (a <= 708330) kyuyo = a * 0.1 + 91667;
+    else kyuyo = 162500;
+    kyuyo = Math.ceil(kyuyo);
+    var b = a - kyuyo - 48334 - 31667 * deps;
+    b = Math.floor(b / 1000) * 1000;
+    if (b <= 0) return 0;
+    var t;
+    if (b <= 162500) t = b * 0.05105;
+    else if (b <= 275000) t = b * 0.1021 - 8296;
+    else if (b <= 579166) t = b * 0.2042 - 36374;
+    else if (b <= 750000) t = b * 0.23483 - 54113;
+    else if (b <= 1500000) t = b * 0.33693 - 130688;
+    else if (b <= 3333333) t = b * 0.4084 - 237893;
+    else t = b * 0.45945 - 408061;
+    return Math.max(0, Math.round(t / 10) * 10);
+  }
+
+  // ---------- 全体計算 ----------
+  function compute() {
+    var per = getPeriod(state), mid = state.midClose ? parseIso(state.midClose) : per.start;
+    var act = { work: 0, night: 0, ot: 0, hol: 0, days: 0 }, plan = { work: 0, night: 0, ot: 0, hol: 0, days: 0 };
+    var rows = [];
+    per.days.forEach(function (d) {
+      var k = iso(d), isAct = d <= mid, sh = state.shifts[k];
+      var r = calcDay(sh);
+      rows.push({ d: d, k: k, isAct: isAct, sh: sh, r: r, pay: payFor(r) });
+      if (isAct && state.actualMode === "total") return;
+      var bk = isAct ? act : plan;
+      bk.work += r.work; bk.night += r.night; bk.ot += r.ot; bk.hol += r.hol;
+      if (r.work > 0) bk.days++;
+    });
+    if (state.actualMode === "total") {
+      var t = state.totals;
+      act = { work: num(t.hours) * 60, night: num(t.night) * 60, ot: num(t.ot) * 60, hol: num(t.hol) * 60, days: num(t.days) };
+    }
+    var pa = payFor(act), pp = payFor(plan);
+    var days = act.days + plan.days;
+    var trans = state.transType === "daily" ? num(state.transAmount) * days : state.transType === "monthly" ? num(state.transAmount) : 0;
+    var transA = state.transType === "daily" ? num(state.transAmount) * act.days : state.transType === "monthly" ? num(state.transAmount) * (act.days / Math.max(1, days)) : 0;
+    var allowance = num(state.allowance);
+    var base = state.payType === "hourly" ? Math.round(pa.base + pp.base) : num(state.monthlyBase);
+    var night = Math.round(pa.night + pp.night), ot = Math.round(pa.ot + pp.ot), hol = Math.round(pa.hol + pp.hol);
+    var gross = base + night + ot + hol + allowance + Math.round(trans);
+
+    // 実績・予定の内訳（固定分は出勤日数で按分）
+    var fixedShare = state.payType === "monthly" ? num(state.monthlyBase) + allowance : allowance;
+    var ratioA = days > 0 ? act.days / days : 0;
+    var actAmount = Math.round(sumPay(pa) + transA + fixedShare * ratioA);
+    var planAmount = gross - actAmount;
+
+    var si = { health: 0, care: 0, pension: 0, emp: 0 }, std = 0;
+    if (state.siOn === "1") {
+      std = num(state.stdPay) > 0 ? num(state.stdPay) : stdGrade(gross);
+      si.health = round50(std * num(state.rateHealth) / 100);
+      si.care = round50(std * num(state.rateCare) / 100);
+      si.pension = round50(Math.min(650000, Math.max(88000, std)) * num(state.ratePension) / 100);
+    }
+    si.emp = round50(gross * num(state.rateEmp) / 100);
+    var siTotal = si.health + si.care + si.pension + si.emp;
+    var nonTaxTrans = Math.min(150000, Math.round(trans));
+    var taxable = gross - nonTaxTrans - siTotal;
+    var tax = state.taxMode === "kou" ? incomeTax(taxable, Math.max(0, Math.floor(num(state.dependents)))) : 0;
+    var resident = num(state.residentTax), other = num(state.otherDeduct);
+    var deduct = siTotal + tax + resident + other;
+
+    return {
+      per: per, mid: mid, rows: rows, act: act, plan: plan, days: days,
+      base: base, night: night, ot: ot, hol: hol, allowance: allowance, trans: Math.round(trans),
+      gross: gross, actAmount: actAmount, planAmount: planAmount,
+      si: si, std: std, tax: tax, resident: resident, other: other, deduct: deduct, net: gross - deduct,
+      scheduledWage: base + allowance
+    };
+  }
+
+  // ---------- 描画 ----------
+  var $ = function (id) { return document.getElementById(id); };
+  var FIELDS = ["payType","hourlyRate","monthlyBase","avgHours","month","closing","midClose","rateNight","rateOt","rateHol","otLimit","roundUnit","allowance","transType","transAmount","siOn","stdPay","rateHealth","rateCare","ratePension","rateEmp","taxMode","dependents","residentTax","otherDeduct"];
+
+  (function buildClosing() {
+    var sel = $("closing"), html = '<option value="end">末日締め</option>';
+    for (var i = 5; i <= 28; i++) html += '<option value="' + i + '">' + i + '日締め</option>';
+    sel.innerHTML = html;
+  })();
+
+  function fillForm() {
+    FIELDS.forEach(function (f) { var el = $(f); if (el && document.activeElement !== el) el.value = state[f] === undefined ? "" : state[f]; });
+    $("tDays").value = state.totals.days; $("tHours").value = state.totals.hours; $("tNight").value = state.totals.night; $("tOt").value = state.totals.ot; $("tHol").value = state.totals.hol;
+  }
+
+  function syncVisibility() {
+    document.querySelectorAll("[data-show]").forEach(function (el) { el.hidden = el.getAttribute("data-show") !== state.payType; });
+    document.querySelectorAll("[data-si]").forEach(function (el) { el.hidden = state.siOn !== "1"; });
+    $("transAmount").closest(".field").hidden = state.transType === "none";
+    $("transLabel").textContent = state.transType === "daily" ? "交通費（1日あたり）" : "交通費（月額）";
+    $("dependents").closest(".field").hidden = state.taxMode !== "kou";
+    $("modeDaily").setAttribute("aria-pressed", state.actualMode === "daily");
+    $("modeTotal").setAttribute("aria-pressed", state.actualMode === "total");
+    $("totalsForm").hidden = state.actualMode !== "total";
+  }
+
+  function presetOptions(selected) {
+    var h = '<option value="">—</option>';
+    state.presets.forEach(function (p, i) { h += '<option value="' + i + '"' + (selected === i ? " selected" : "") + ">" + esc(p.name) + "</option>"; });
+    return h + '<option value="off">休み</option>';
+  }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function matchPreset(sh) {
+    if (!sh || !sh.s) return -1;
+    for (var i = 0; i < state.presets.length; i++) { var p = state.presets[i]; if (p.s === sh.s && p.e === sh.e && +p.b === +sh.b) return i; }
+    return -1;
+  }
+
+  function renderPresets() {
+    var h = "";
+    state.presets.forEach(function (p, i) {
+      h += '<div class="preset-row" data-i="' + i + '">' +
+        '<input aria-label="パターン名" data-k="name" value="' + esc(p.name) + '">' +
+        '<input aria-label="開始" type="time" data-k="s" value="' + p.s + '">' +
+        '<input aria-label="終了" type="time" data-k="e" value="' + p.e + '">' +
+        '<div class="inline"><input aria-label="休憩(分)" type="number" min="0" step="5" data-k="b" value="' + p.b + '"><span class="unit">分</span></div>' +
+        '<button class="btn" type="button" data-del="' + i + '">削除</button></div>';
+    });
+    $("presetList").innerHTML = h;
+    $("bulkPreset").innerHTML = state.presets.map(function (p, i) { return '<option value="' + i + '">' + esc(p.name) + " " + p.s + "–" + p.e + "</option>"; }).join("");
+  }
+
+  function renderLedger(res) {
+    var h = "", hideAct = state.actualMode === "total";
+    var midK = iso(res.mid);
+    res.rows.forEach(function (row) {
+      if (hideAct && row.isAct) return;
+      var sh = row.sh || {}, dw = row.d.getDay(), off = !row.r.work;
+      var cls = [row.isAct ? "is-act" : "is-plan", dw === 0 ? "sun" : dw === 6 ? "sat" : "", row.k === midK ? "cut" : "", off ? "off" : ""].join(" ");
+      var amt = sumPay(row.pay);
+      h += '<tr class="' + cls + '" data-k="' + row.k + '">' +
+        '<td class="date">' + (row.d.getMonth() + 1) + "/" + pad(row.d.getDate()) + "</td>" +
+        '<td class="dow">' + DOW[dw] + "</td>" +
+        "<td>" + (row.isAct ? '<span class="chip act">実績</span>' : '<span class="chip plan">予定</span>') + "</td>" +
+        '<td><select aria-label="パターン" data-f="preset">' + presetOptions(matchPreset(row.sh)) + "</select></td>" +
+        '<td><input aria-label="開始" type="time" data-f="s" value="' + (sh.s || "") + '"></td>' +
+        '<td><input aria-label="終了" type="time" data-f="e" value="' + (sh.e || "") + '"></td>' +
+        '<td><input aria-label="休憩(分)" type="number" min="0" step="5" data-f="b" value="' + (sh.s ? (sh.b || 0) : "") + '"></td>' +
+        '<td><input aria-label="法定休日" type="checkbox" data-f="hol"' + (sh.hol ? " checked" : "") + "></td>" +
+        '<td class="num">' + (off ? "—" : hm(row.r.work)) + "</td>" +
+        '<td class="num">' + (row.r.night ? hm(row.r.night) : "") + "</td>" +
+        '<td class="num">' + (row.r.ot ? hm(row.r.ot) : "") + "</td>" +
+        '<td class="num">' + (off ? "" : Math.round(amt).toLocaleString("ja-JP")) + "</td></tr>";
+    });
+    $("ledgerBody").innerHTML = h;
+    var all = { work: res.act.work + res.plan.work, night: res.act.night + res.plan.night, ot: res.act.ot + res.plan.ot };
+    $("ledgerFoot").innerHTML = '<tr><td colspan="8">期間合計' + (hideAct ? "（実績は合計入力分を含む）" : "") + '</td><td class="num">' + hm(all.work) + '</td><td class="num">' + hm(all.night) + '</td><td class="num">' + hm(all.ot) + '</td><td class="num">' + (res.base + res.night + res.ot + res.hol - (state.payType === "monthly" ? res.base : 0)).toLocaleString("ja-JP") + "</td></tr>";
+    var actDays = res.rows.filter(function (r) { return r.isAct; }).length;
+    $("ledgerSub").textContent = "実績 " + actDays + "日 / 予定 " + (res.rows.length - actDays) + "日";
+  }
+
+  function rowHtml(label, val, cls) { return '<div class="row ' + (cls || "") + '"><span>' + label + "</span><span>" + val + "</span></div>"; }
+
+  function renderSummary(res) {
+    $("periodLabel").innerHTML = "対象期間 <b>" + fmtDate(res.per.start) + " – " + fmtDate(res.per.end) + "</b><br>中締め <b>" + fmtDate(res.mid) + "</b> まで実績";
+    $("sGross").innerHTML = Math.round(res.gross).toLocaleString("ja-JP") + "<small>円</small>";
+    $("sAct").textContent = yen(res.actAmount); $("sPlan").textContent = yen(res.planAmount);
+    var tot = Math.max(1, res.actAmount + res.planAmount);
+    $("barA").style.width = (Math.max(0, res.actAmount) / tot * 100) + "%";
+    $("barP").style.width = (Math.max(0, res.planAmount) / tot * 100) + "%";
+    $("hDays").textContent = res.days;
+    $("hTotal").textContent = hm(res.act.work + res.plan.work);
+    $("hNight").textContent = hm(res.act.night + res.plan.night);
+    $("hOt").textContent = hm(res.act.ot + res.plan.ot);
+
+    var p = "";
+    p += rowHtml(state.payType === "hourly" ? "基本給（時給 × 労働時間）" : "基本給", yen(res.base));
+    if (state.payType === "hourly") p += rowHtml("実績 " + hm(res.act.work) + " ／ 予定 " + hm(res.plan.work), "", "sub");
+    p += rowHtml("深夜割増", yen(res.night));
+    p += rowHtml("時間外手当", yen(res.ot));
+    if (res.hol) p += rowHtml("休日手当", yen(res.hol));
+    if (res.allowance) p += rowHtml("固定手当", yen(res.allowance));
+    if (state.transType !== "none") p += rowHtml("通勤手当（非課税）", yen(res.trans));
+    p += rowHtml("総支給額", yen(res.gross), "total");
+    $("payRows").innerHTML = p;
+
+    var d = "";
+    if (state.siOn === "1") {
+      d += rowHtml("健康保険", yen(res.si.health));
+      if (res.si.care) d += rowHtml("介護保険", yen(res.si.care));
+      d += rowHtml("厚生年金", yen(res.si.pension));
+      d += rowHtml("標準報酬月額 " + res.std.toLocaleString("ja-JP") + "円" + (num(state.stdPay) > 0 ? "" : "（推定）"), "", "sub");
+    }
+    if (res.si.emp) d += rowHtml("雇用保険", yen(res.si.emp));
+    if (state.taxMode === "kou") d += rowHtml("所得税", yen(res.tax));
+    if (res.resident) d += rowHtml("住民税", yen(res.resident));
+    if (res.other) d += rowHtml("その他", yen(res.other));
+    d += rowHtml("控除合計", yen(res.deduct), "total");
+    $("deductRows").innerHTML = d;
+    $("sNet").textContent = yen(res.net);
+
+    var annual = res.gross * 12;
+    var lines = [
+      { label: "年収換算（交通費込み）", value: Math.round(annual / 10000).toLocaleString("ja-JP") + "万円", pill: null },
+      { label: "社保加入の目安 月8.8万円（所定内賃金）", over: res.scheduledWage >= 88000 },
+      { label: "扶養の目安 年130万円（交通費込み）", over: annual >= 1300000 },
+      { label: "所得税がかかる目安 年160万円", over: (res.gross - res.trans) * 12 > 1600000 }
+    ];
+    $("walls").innerHTML = lines.map(function (l) {
+      var right = l.pill === null ? '<b style="font-family:var(--font-num)">' + l.value + "</b>" : '<span class="pill ' + (l.over ? "over" : "under") + '">' + (l.over ? "超える" : "下回る") + "</span>";
+      return "<div><span>" + l.label + "</span>" + right + "</div>";
+    }).join("");
+  }
+  function fmtDate(d) { return d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate() + "(" + DOW[d.getDay()] + ")"; }
+
+  var lastRes;
+  function render(full) {
+    syncVisibility();
+    var res = compute();
+    lastRes = res;
+    if (full !== false) renderLedger(res); else updateLedgerNumbers(res);
+    renderSummary(res);
+  }
+  // 入力中にフォーカスを失わないよう、台帳は数値セルだけ更新する
+  function updateLedgerNumbers(res) {
+    var map = {}; res.rows.forEach(function (r) { map[r.k] = r; });
+    document.querySelectorAll("#ledgerBody tr").forEach(function (tr) {
+      var row = map[tr.getAttribute("data-k")]; if (!row) return;
+      var c = tr.querySelectorAll("td.num"), off = !row.r.work;
+      c[0].textContent = off ? "—" : hm(row.r.work);
+      c[1].textContent = row.r.night ? hm(row.r.night) : "";
+      c[2].textContent = row.r.ot ? hm(row.r.ot) : "";
+      c[3].textContent = off ? "" : Math.round(sumPay(row.pay)).toLocaleString("ja-JP");
+      tr.classList.toggle("off", off);
+      var sel = tr.querySelector('select[data-f="preset"]'), mi = matchPreset(row.sh);
+      if (sel && document.activeElement !== sel) sel.value = mi >= 0 ? String(mi) : "";
+    });
+    var all = { work: res.act.work + res.plan.work, night: res.act.night + res.plan.night, ot: res.act.ot + res.plan.ot };
+    var f = document.querySelectorAll("#ledgerFoot td.num");
+    if (f.length) { f[0].textContent = hm(all.work); f[1].textContent = hm(all.night); f[2].textContent = hm(all.ot); f[3].textContent = (res.base + res.night + res.ot + res.hol - (state.payType === "monthly" ? res.base : 0)).toLocaleString("ja-JP"); }
+  }
+
+  // ---------- イベント ----------
+  FIELDS.forEach(function (f) {
+    var el = $(f);
+    el.addEventListener("input", function () {
+      state[f] = el.value;
+      if (f === "month" || f === "closing") {
+        var per = getPeriod(state);
+        state.midClose = iso(addDays(per.start, Math.min(15, per.days.length - 1)));
+        $("midClose").value = state.midClose;
+      }
+      if (f === "midClose" && el.value) {
+        var p2 = getPeriod(state), m = parseIso(el.value);
+        if (m < p2.start || m > p2.end) return; // 期間外の日付は反映しない
+      }
+      save();
+      render(["month", "closing", "midClose", "roundUnit", "otLimit"].indexOf(f) >= 0 || f.indexOf("rate") === 0 || f === "hourlyRate" || f === "payType" || f === "monthlyBase" || f === "avgHours" ? true : false);
+    });
+  });
+  ["tDays", "tHours", "tNight", "tOt", "tHol"].forEach(function (id) {
+    $(id).addEventListener("input", function () {
+      var key = { tDays: "days", tHours: "hours", tNight: "night", tOt: "ot", tHol: "hol" }[id];
+      state.totals[key] = $(id).value; save(); render(false);
+    });
+  });
+  $("modeDaily").addEventListener("click", function () { state.actualMode = "daily"; save(); render(); });
+  $("modeTotal").addEventListener("click", function () { state.actualMode = "total"; save(); render(); });
+
+  $("ledgerBody").addEventListener("input", function (ev) {
+    var el = ev.target, tr = el.closest("tr"); if (!tr) return;
+    var k = tr.getAttribute("data-k"), f = el.getAttribute("data-f");
+    var sh = state.shifts[k] || { s: "", e: "", b: 0, hol: false };
+    if (f === "preset") {
+      if (el.value === "off" || el.value === "") { if (el.value === "off") delete state.shifts[k]; save(); render(); return; }
+      var p = state.presets[+el.value];
+      state.shifts[k] = { s: p.s, e: p.e, b: +p.b, hol: sh.hol };
+      save(); render(); return;
+    }
+    if (f === "hol") sh.hol = el.checked; else if (f === "b") sh.b = num(el.value); else sh[f] = el.value;
+    if (!sh.s && !sh.e) delete state.shifts[k]; else state.shifts[k] = sh;
+    save(); render(false);
+  });
+
+  $("presetList").addEventListener("input", function (ev) {
+    var el = ev.target, row = el.closest(".preset-row"); if (!row) return;
+    var i = +row.getAttribute("data-i"), k = el.getAttribute("data-k");
+    state.presets[i][k] = k === "b" ? num(el.value) : el.value;
+    save();
+    $("bulkPreset").innerHTML = state.presets.map(function (p, j) { return '<option value="' + j + '">' + esc(p.name) + " " + p.s + "–" + p.e + "</option>"; }).join("");
+    render();
+  });
+  $("presetList").addEventListener("click", function (ev) {
+    var b = ev.target.closest("[data-del]"); if (!b) return;
+    state.presets.splice(+b.getAttribute("data-del"), 1); save(); renderPresets(); render();
+  });
+  $("addPreset").addEventListener("click", function () {
+    state.presets.push({ name: "パターン" + (state.presets.length + 1), s: "10:00", e: "18:00", b: 60 });
+    save(); renderPresets(); render();
+  });
+
+  $("bulkApply").addEventListener("click", function () {
+    var p = state.presets[+$("bulkPreset").value]; if (!p) return;
+    var which = $("bulkDow").value, res = lastRes || compute();
+    res.rows.forEach(function (r) {
+      if (r.isAct || state.shifts[r.k]) return;
+      var dw = r.d.getDay();
+      var ok = which === "all" || (which === "wd" && dw >= 1 && dw <= 5) || (which === "we" && (dw === 0 || dw === 6)) || which === String(dw);
+      if (ok) state.shifts[r.k] = { s: p.s, e: p.e, b: +p.b, hol: false };
+    });
+    save(); render();
+  });
+  $("clearPlan").addEventListener("click", function () {
+    (lastRes || compute()).rows.forEach(function (r) { if (!r.isAct) delete state.shifts[r.k]; });
+    save(); render();
+  });
+
+  $("copySummary").addEventListener("click", function () {
+    var r = lastRes;
+    var text = [
+      "【給与予測】" + fmtDate(r.per.start) + "〜" + fmtDate(r.per.end) + "（中締め " + fmtDate(r.mid) + "）",
+      "総支給額: " + yen(r.gross) + "（実績 " + yen(r.actAmount) + " / 予定 " + yen(r.planAmount) + "）",
+      "労働 " + hm(r.act.work + r.plan.work) + " / 深夜 " + hm(r.act.night + r.plan.night) + " / 時間外 " + hm(r.act.ot + r.plan.ot) + " / 出勤 " + r.days + "日",
+      "控除合計: " + yen(r.deduct),
+      "手取り見込み: " + yen(r.net)
+    ].join("\n");
+    var msg = $("copyMsg");
+    try {
+      navigator.clipboard.writeText(text).then(function () { msg.textContent = "コピーしました"; }, function () { msg.textContent = "コピーできませんでした"; });
+    } catch (e) { msg.textContent = "コピーできませんでした"; }
+    setTimeout(function () { msg.textContent = ""; }, 2500);
+  });
+  $("resetAll").addEventListener("click", function () { $("resetConfirm").hidden = false; });
+  $("resetNo").addEventListener("click", function () { $("resetConfirm").hidden = true; });
+  $("resetYes").addEventListener("click", function () {
+    state = sampleState(); save(); $("resetConfirm").hidden = true; fillForm(); renderPresets(); render();
+  });
+
+  fillForm(); renderPresets(); render();
+})();
+</script>
+</body>
+</html>
