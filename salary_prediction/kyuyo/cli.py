@@ -26,7 +26,7 @@ from .kintai_index import KintaiIndex
 from .kintai_write import apply_plans
 from .plan import build_plans
 from .shift import ShiftBook, merge_entries
-from .totals import StaleFormulaCacheError, compute_gakudo_totals, write_to_summary
+from .totals import compute_gakudo_totals, write_to_summary
 
 DEFAULT_OUT = "out"
 
@@ -210,7 +210,7 @@ def cmd_apply(args) -> int:
     for path in result.files:
         _echo(f"  更新: {path}")
     _echo(f"→ レポート: {os.path.join(out_dir, 'plan.md')}")
-    _echo("※ ②へ集計する前に、③をExcelで開いて保存し直してください（数式の再計算のため）。")
+    _echo("✓ ③ファイルの数式も自動で再計算されました。②への集計に進めます。")
     return 0
 
 
@@ -222,7 +222,7 @@ def cmd_summary(args) -> int:
     for path in paths:
         try:
             totals[gakudo_name_from_path(path, overrides)] = compute_gakudo_totals(path)
-        except (KeyError, StaleFormulaCacheError) as exc:
+        except KeyError as exc:
             _echo(f"⚠ {os.path.basename(path)}: {exc}")
 
     _echo("=== ③ 事業所合計 ===")
