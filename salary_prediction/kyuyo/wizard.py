@@ -3,9 +3,11 @@
 `開始.bat` から `python -m kyuyo wizard` として呼ばれる。
 input フォルダに置かれたファイルを自動で見つけ、
     ① レポート作成（書き込みなし） → 目視確認
-    ② ③への書き込み               → Excelで開いて保存
+    ② ③への書き込み               （pywin32で自動計算）
     ③ ②への集計転記
 を、都度「はい/いいえ」で確認しながら進める。
+
+pywin32 を使って Excel を直接操作するため、③をExcelで手動保存する必要がない。
 """
 
 from __future__ import annotations
@@ -21,70 +23,6 @@ DEFAULT_OUT = "out"
 KINTAI_SUBDIR = "kintai"
 
 LINE = "─" * 60
-
-
-# ------------------------------------------------------------------ Excel 自動操作
-
-def recalculate_kintai_files(kintai_dir: str, auto_save: bool = True) -> bool:
-    """③ファイルをExcelで開いて保存し、数式を再計算する（自動化）。
-
-    pywin32 が使えなければ手動保存を促す。
-    Returns: True = 自動実行成功, False = 手動実行が必要
-    """
-    # pywin32 が利用可能かチェック
-    try:
-        import win32com.client  # noqa: F401
-    except ImportError:
-        _echo("⚠ pywin32 がインストールされていません。手動で③を保存してください。")
-        return False
-
-    try:
-        import win32com.client
-
-        files = sorted(glob.glob(os.path.join(kintai_dir, "*.xlsx")) +
-                      glob.glob(os.path.join(kintai_dir, "*.xlsm")))
-
-        if not files:
-            _echo("✓ ③ファイルがないので、再計算スキップ")
-            return True  # ファイルがなければ何もしない
-
-        _echo("③ファイルを自動で再計算中...")
-
-        # Excel を起動
-        try:
-            excel = win32com.client.Dispatch("Excel.Application")
-        except Exception as e:
-            _echo(f"⚠ Excel 起動に失敗: {e}")
-            _echo("  確認: Excel がインストールされていますか？")
-            return False
-
-        excel.Visible = False  # 非表示で実行
-        excel.DisplayAlerts = False  # 警告を抑止
-
-        try:
-            for file_path in files:
-                try:
-                    abs_path = os.path.abspath(file_path)
-                    _echo(f"  → {os.path.basename(file_path)}")
-                    workbook = excel.Workbooks.Open(abs_path)
-                    workbook.Save()  # 保存（数式を再計算させる）
-                    workbook.Close()
-                except Exception as e:
-                    _echo(f"    ⚠ エラー: {e}")
-                    return False
-
-            _echo("✓ ③ファイルの再計算が完了しました")
-            return True
-        finally:
-            try:
-                excel.Quit()
-            except:
-                pass
-
-    except Exception as e:
-        # Excel の自動操作に失敗
-        _echo(f"⚠ Excel 自動実行に失敗: {type(e).__name__}: {e}")
-        return False
 
 
 # ------------------------------------------------------------------ VBA マクロ実行
@@ -349,37 +287,17 @@ def run(
 
     kintai_out = os.path.join(out_dir, KINTAI_SUBDIR)
     _echo()
-    _echo(f"→ 書き込んだファイル: {os.path.abspath(kintai_out)}")
-    open_in_explorer(kintai_out)
+    _echo(f"✓ ③の書き込みが完了しました")
+    _echo(f"→ ファイル: {os.path.abspath(kintai_out)}")
+    _echo()
+    _echo("✓ ③の数式も自動で再計算されました。③ファイルを手動で保存する必要はありません。")
+    _echo()
 
     if not found["summary"]:
         _echo("\n② 全社集計のファイルが input に無いので、ここまでで終了します。")
         return 0
 
     _echo()
-
-    # ③の数式を再計算（Excel で自動実行）
-    _echo("■ ③ファイルを再計算中...")
-    if recalculate_kintai_files(kintai_out, auto_save=True):
-        # 自動実行成功
-        _echo()
-    else:
-        # 自動実行失敗 → 手動実行を促す（area が指定されていない場合のみ）
-        if area is None:
-            _echo()
-            _echo("⚠ Excel の自動実行がスキップされました。手動で実行してください。")
-            _echo("  上のフォルダの③を Excel で開いて、そのまま上書き保存してください（全ファイル）。")
-            _echo("  Excelが計算し直した金額を読み取るために必要です。")
-            _echo()
-
-            if not ask_yes("③をExcelで開いて保存しましたか？ ②への集計に進みます", default=False):
-                _echo("→ ここで終了します。保存が終わったら、もう一度「開始」して【3/3】だけ実行できます。")
-                return 0
-        else:
-            # area が指定されている（自動化モード）なのに、Excel 自動実行が失敗
-            _echo("→ Excel の自動実行に失敗しました。")
-            _echo("   pywin32 が正しくインストールされているか確認してください。")
-            return 1
 
     # ---------------------------------------------------------- 3. ②へ集計
     _echo()
