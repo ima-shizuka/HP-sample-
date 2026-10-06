@@ -225,16 +225,16 @@ def run(
             _echo(f"  ・{problem}")
         _echo()
         _echo(f"  {os.path.abspath(base_dir)} を開きます。以下のように置いてから、もう一度「開始」してください。")
-        _echo("    ① シフト表          → input\\shift.xlsx")
-        _echo("    ② 全社集計          → input\\summary.xlsm")
-        _echo("    ③ 各学童の給与明細  → input\\kintai\\ の中に全部（名前はそのまま）")
+        _echo("    ① シフト表（今月の勤務表）        → input\\shift.xlsx")
+        _echo("    ② 全社集計（各学童の合計を記入）  → input\\summary.xlsm")
+        _echo("    ③ 給与明細シート（学童ごと）      → input\\kintai\\ の中に全部（名前はそのまま）")
         open_in_explorer(base_dir)
         return 1
 
     _echo("■ 今月のファイル")
-    _echo(f"  ① シフト表 : {os.path.basename(found['shift'])}")
-    _echo(f"  ③ 給与明細 : {len(found['kintai_files'])}ファイル")
-    _echo(f"  ② 全社集計 : {os.path.basename(found['summary']) if found['summary'] else '（未配置。③までで止まります）'}")
+    _echo(f"  ① シフト表（今月の勤務表） : {os.path.basename(found['shift'])}")
+    _echo(f"  ③ 給与明細シート（学童ごと） : {len(found['kintai_files'])}ファイル")
+    _echo(f"  ② 全社集計（各学童の合計） : {os.path.basename(found['summary']) if found['summary'] else '（未配置。③までで止まります）'}")
     fixed_path = cli.default_fixed_path()
     _echo(f"  固定シフト : {os.path.basename(fixed_path) if fixed_path else '（無し。fixed_shifts.json を置くと①に出てこない先生も埋められます）'}")
     _echo()
@@ -251,7 +251,7 @@ def run(
 
     # ---------------------------------------------------------- 1. レポート
     _echo(LINE)
-    _echo("【1/3】①を読んで、書き込み内容の一覧を作ります（まだ何も書き換えません）")
+    _echo("【1/3】① シフト表を読んで、書き込み内容の一覧を作ります（まだ何も書き換えません）")
     _echo(LINE)
     common = ["--shift", found["shift"], "--kintai-dir", found["kintai_dir"],
               "--from-day", from_day_str, "--out-dir", out_dir]
@@ -276,7 +276,7 @@ def run(
     # ---------------------------------------------------------- 2. ③へ書き込み
     _echo()
     _echo(LINE)
-    _echo("【2/3】③に書き込みます（原本は変更せず、out\\kintai にコピーを作ります）")
+    _echo("【2/3】③ 給与明細シートに書き込みます（原本は変更せず、out\\kintai にコピーを作ります）")
     _echo(LINE)
     try:
         cli.main(["apply", *common, "--yes"])
@@ -302,7 +302,7 @@ def run(
     # ---------------------------------------------------------- 3. ②へ集計
     _echo()
     _echo(LINE)
-    _echo("【3/3】③の合計を②に転記します")
+    _echo("【3/3】③ 給与明細シートの合計を ② 全社集計に転記します")
     _echo(LINE)
     if area is None:
         area = ask("②のシート名", "磐田")
@@ -318,7 +318,7 @@ def run(
 
     # ---------------------------------------------------------- 4. VBA マクロ実行 + ファイル配置
     _echo(LINE)
-    _echo("【4/4】ファイルを配置して VBA マクロを実行します")
+    _echo("【4/4】③と②を個人フォルダにコピーして、VBA マクロを実行します")
     _echo(LINE)
 
     # コピー先フォルダを取得（config.json or 入力）
