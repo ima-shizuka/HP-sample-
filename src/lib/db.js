@@ -87,6 +87,14 @@ export async function deleteSession(id) {
   return deleteDoc(sessionRef(id));
 }
 
+export async function softDeleteSession(id) {
+  return updateDoc(sessionRef(id), { deleted: true, deletedAt: serverTimestamp(), updatedAt: serverTimestamp() });
+}
+
+export async function restoreSession(id) {
+  return updateDoc(sessionRef(id), { deleted: false, updatedAt: serverTimestamp() });
+}
+
 export function subscribeToSessions(callback) {
   const q = query(sessionsRef(), orderBy('date', 'asc'));
   return onSnapshot(q, (snap) => {

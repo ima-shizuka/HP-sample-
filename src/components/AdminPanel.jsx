@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { format, parseISO, addDays, startOfMonth, endOfMonth, eachDayOfInterval, getDay } from 'date-fns';
 import { ja } from 'date-fns/locale';
 import {
   Users, Clock, X, Download, Plus, Trash2, ChevronDown, ChevronUp,
-  LogOut, Calendar, Bell, RefreshCw
+  LogOut, Calendar, Bell, RefreshCw, MoreVertical
 } from 'lucide-react';
 import {
   createSession,
-  deleteSession,
+  softDeleteSession,
+  restoreSession,
   cancelRegistration,
   adminConfirmUpgrade,
   adminAddParticipant,
@@ -20,7 +21,6 @@ function fmtDate(d) {
   return format(parseISO(d), 'M月d日(E)', { locale: ja });
 }
 
-/** 開始時間を過ぎたセッションは操作不可（ロック）とする */
 function hasStarted(session) {
   const d = parseISO(session.date);
   const now = new Date();
@@ -29,7 +29,6 @@ function hasStarted(session) {
     const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), h, m);
     return start <= now;
   }
-  // 開始時間なし → 当日 0:00 を過ぎたら（日付が過去になったら）ロック
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return d < today;
@@ -132,6 +131,17 @@ function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggl
   const [togglingOpen, setTogglingOpen] = useState(false);
   const [adminAddName, setAdminAddName] = useState('');
   const [adminAdding, setAdminAdding] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -145,7 +155,7 @@ function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggl
 
   function downloadCSV() {
     const csv = toCSV(regs, session.date);
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -155,12 +165,18 @@ function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggl
   }
 
   async function handleDelete() {
-    if (!confirm(`${fmtDate(session.date)} を削除しますか？\n登録データは残ります。`)) return;
+    setMenuOpen(false);
+    const dateStr = fmtDate(session.date);
+    const timeStr = session.startTime
+      ? `${session.startTime}${session.endTime ? '〜' + session.endTime : ''}の`
+      : '';
+    if (!confirm(`${dateStr} ${timeStr}予定を削除しますか？\n削除後は「削除した項目」から元に戻せます。`)) return;
     setDeleting(true);
     try { await onDelete(session.id); } finally { setDeleting(false); }
   }
 
   async function handleToggleOpen() {
+    setMenuOpen(false);
     const willOpen = session.isOpen === false;
     if (!confirm(willOpen ? '募集を再開しますか？' : '募集を停止しますか？\n保護者向けページから非表示になります。')) return;
     setTogglingOpen(true);
@@ -233,27 +249,36 @@ function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggl
         </div>
         <div className="flex items-center gap-1">
           {!locked && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleToggleOpen(); }}
-              disabled={togglingOpen}
-              className={`p-1.5 text-xs font-medium rounded-lg disabled:opacity-50 ${
-                session.isOpen === false
-                  ? 'text-gray-500 bg-gray-100 hover:bg-gray-200'
-                  : 'text-blue-600 bg-blue-50 hover:bg-blue-100'
-              }`}
-              title={session.isOpen === false ? '募集再開' : '募集停止'}
-            >
-              {session.isOpen === false ? '再開' : '停止'}
-            </button>
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+                disabled={deleting || togglingOpen}
+                className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg disabled:opacity-50"
+                title="メニュー"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-20 py-1 w-36">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleToggleOpen(); }}
+                    disabled={togglingOpen}
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    {session.isOpen === false ? '募集再開' : '募集停止'}
+                  </button>
+                  <div className="border-t border-gray-100" />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDelete(); }}
+                    disabled={deleting}
+                    className="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    削除
+                  </button>
+                </div>
+              )}
+            </div>
           )}
-          <button
-            onClick={(e) => { e.stopPropagation(); handleDelete(); }}
-            disabled={deleting}
-            className="p-1.5 text-red-300 hover:text-red-500 disabled:opacity-50"
-            title="削除"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
           {expanded ? <ChevronUp className="w-5 h-5 text-gray-400" /> : <ChevronDown className="w-5 h-5 text-gray-400" />}
         </div>
       </button>
@@ -324,6 +349,37 @@ function SessionCard({ session, onDelete, onCancelReg, onConfirmUpgrade, onToggl
   );
 }
 
+// ─── Deleted session card ──────────────────────────────────────────────────────
+function DeletedSessionCard({ session, onRestore }) {
+  const [restoring, setRestoring] = useState(false);
+
+  async function handleRestore() {
+    setRestoring(true);
+    try { await onRestore(session.id); } finally { setRestoring(false); }
+  }
+
+  return (
+    <div className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0">
+      <div>
+        <div className="text-sm text-gray-400 line-through">{fmtDate(session.date)}</div>
+        {(session.startTime || session.endTime) && (
+          <div className="text-xs text-gray-300">
+            {session.startTime}{session.startTime && session.endTime ? '〜' : ''}{session.endTime}
+          </div>
+        )}
+      </div>
+      <button
+        onClick={handleRestore}
+        disabled={restoring}
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg disabled:opacity-50"
+      >
+        <RefreshCw className="w-3 h-3" />
+        {restoring ? '...' : '元に戻す'}
+      </button>
+    </div>
+  );
+}
+
 // ─── Add single session form ───────────────────────────────────────────────────
 function AddSessionForm({ onAdd }) {
   const [date, setDate] = useState('');
@@ -350,7 +406,6 @@ function AddSessionForm({ onAdd }) {
 
   return (
     <form onSubmit={handleSubmit} className="w-full space-y-3">
-      {/* 日付: 1行フル幅 */}
       <div className="space-y-1">
         <label className="text-xs font-medium text-gray-600">日付</label>
         <div className="flex">
@@ -363,7 +418,6 @@ function AddSessionForm({ onAdd }) {
           />
         </div>
       </div>
-      {/* 定員: ラベル左・入力右寄せ */}
       <div className="flex items-center gap-2">
         <label className="text-xs font-medium text-gray-600 shrink-0">定員</label>
         <input
@@ -376,7 +430,6 @@ function AddSessionForm({ onAdd }) {
         />
         <span className="text-xs text-gray-500 shrink-0">人</span>
       </div>
-      {/* 開始・終了時間: 2列 */}
       <div className="grid grid-cols-2 gap-4">
         <div className="min-w-0 space-y-1">
           <label className="text-xs font-medium text-gray-600">開始時間</label>
@@ -401,7 +454,6 @@ function AddSessionForm({ onAdd }) {
           </div>
         </div>
       </div>
-      {/* 公開日時 */}
       <div className="space-y-1">
         <label className="text-xs font-medium text-gray-600">公開日時（空欄＝即時公開）</label>
         <div className="flex">
@@ -425,7 +477,7 @@ function MonthlyBatchForm({ existingDates, onAdd }) {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
-  const [selectedWeekdays, setSelectedWeekdays] = useState([6]); // Saturday default
+  const [selectedWeekdays, setSelectedWeekdays] = useState([6]);
   const [capacity, setCapacity] = useState(20);
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
@@ -605,7 +657,10 @@ export default function AdminPanel({ onLogout }) {
     await createSession(data);
   }
   async function handleDeleteSession(id) {
-    await deleteSession(id);
+    await softDeleteSession(id);
+  }
+  async function handleRestoreSession(id) {
+    await restoreSession(id);
   }
   async function handleCancelReg(registrationId) {
     await cancelRegistration(registrationId);
@@ -620,9 +675,11 @@ export default function AdminPanel({ onLogout }) {
     await adminAddParticipant(sessionId, childName);
   }
 
-  const upcomingSessions = sessions.filter((s) => !hasStarted(s));
-  const pastSessions = sessions.filter((s) => hasStarted(s));
-  const existingDates = sessions.map((s) => s.date);
+  const activeSessions = sessions.filter((s) => !s.deleted);
+  const deletedSessions = sessions.filter((s) => s.deleted);
+  const upcomingSessions = activeSessions.filter((s) => !hasStarted(s));
+  const pastSessions = activeSessions.filter((s) => hasStarted(s));
+  const existingDates = activeSessions.map((s) => s.date);
 
   const totalConfirmed = upcomingSessions.reduce((sum, s) => sum + s.confirmedCount, 0);
   const totalWaiting = upcomingSessions.reduce((sum, s) => sum + s.waitlistCount, 0);
@@ -693,8 +750,8 @@ export default function AdminPanel({ onLogout }) {
 
         {/* Upcoming sessions */}
         <div className="space-y-3">
-          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide flex items-center justify-between">
-            <span>今後の練習日 ({upcomingSessions.length}件)</span>
+          <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wide">
+            今後の練習日 ({upcomingSessions.length}件)
           </h2>
           {loading && <div className="text-center text-gray-400 text-sm py-8">読み込み中...</div>}
           {!loading && upcomingSessions.length === 0 && (
@@ -717,6 +774,22 @@ export default function AdminPanel({ onLogout }) {
             {pastSessions.slice().reverse().map((s) => (
               <SessionCard key={s.id} session={s} onDelete={handleDeleteSession} onCancelReg={handleCancelReg} onConfirmUpgrade={handleConfirmUpgrade} onToggleOpen={handleToggleOpen} onAdminAdd={handleAdminAdd} locked={true} />
             ))}
+          </div>
+        )}
+
+        {/* Deleted sessions */}
+        {deletedSessions.length > 0 && (
+          <div className="card space-y-1">
+            <h2 className="text-sm font-bold text-gray-400 flex items-center gap-2 pb-2">
+              <Trash2 className="w-4 h-4" />
+              削除した項目 ({deletedSessions.length}件)
+            </h2>
+            {deletedSessions
+              .slice()
+              .sort((a, b) => a.date.localeCompare(b.date))
+              .map((s) => (
+                <DeletedSessionCard key={s.id} session={s} onRestore={handleRestoreSession} />
+              ))}
           </div>
         )}
       </div>
